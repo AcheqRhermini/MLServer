@@ -1,5 +1,5 @@
 from collections import defaultdict, OrderedDict
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any, DefaultDict
 
 from ..types import (
     InferenceRequest,
@@ -13,18 +13,70 @@ from .shape import Shape
 
 
 def _get_data(payload: Union[RequestInput, ResponseOutput]):
-    return getattr(payload.data, "__root__", payload.data)
+    return getattr(payload.data, "root", payload.data)
+
+
+def _get_parameters(payload: ResponseOutput) -> DefaultDict[Any, Any]:
+    parameters = defaultdict(list)
+    if payload.parameters is not None:
+        payload_parameters = payload.parameters.model_dump()
+    for param_name, param_values in payload_parameters.items():
+        if param_name in ["content_type", "headers"]:
+            continue
+        for param_value in param_values:
+            parameters[param_name].append(param_value)
+    if "content_type" in payload_parameters.keys():
+        parameters["content_type"] = payload_parameters["content_type"]
+    if "headers" in payload_parameters.keys():
+        parameters["headers"] = payload_parameters["headers"]
+    return parameters
 
 
 def _merge_parameters(
     all_params: dict,
-    parametrised_obj: Union[InferenceRequest, RequestInput, RequestOutput],
+    parametrised_obj: Union[
+        InferenceRequest, InferenceResponse, RequestInput, RequestOutput
+    ],
 ) -> dict:
     if not parametrised_obj.parameters:
         return all_params
 
-    obj_params = parametrised_obj.parameters.dict(exclude_unset=True)
+    obj_params = parametrised_obj.parameters.model_dump()
     return {**all_params, **obj_params}
+
+
+def _merge_input_parameters(
+    all_params: dict,
+    parametrised_obj: Union[
+        InferenceRequest, InferenceResponse, RequestInput, RequestOutput
+    ],
+) -> dict:
+    if not parametrised_obj.parameters:
+        return all_params
+    obj_params = parametrised_obj.parameters.model_dump()
+    if all_params == {}:
+        return obj_params
+    else:
+        common_keys = set(all_params).intersection(set(obj_params)) - {
+            "content_type",
+            "headers",
+        }
+        uncommon_keys = set(all_params).union(set(obj_params)) - common_keys
+        new_all_params = {}
+        for key in common_keys:
+            if isinstance(all_params[key], list):
+                new_value = all_params[key] + [obj_params[key]]
+                new_all_params[key] = new_value
+            else:
+                new_value = [all_params[key]]
+                new_value.append(obj_params[key])
+                new_all_params[key] = new_value
+        for key in uncommon_keys:
+            if key in all_params.keys():
+                new_all_params[key] = all_params[key]
+            if key in obj_params.keys():
+                new_all_params[key] = obj_params[key]
+    return new_all_params
 
 
 def _merge_data(
@@ -107,7 +159,7 @@ class BatchedRequests:
         all_data = []
         all_params: dict = {}
         for internal_id, request_input in request_inputs.items():
-            all_params = _merge_parameters(all_params, request_input)
+            all_params = _merge_input_parameters(all_params, request_input)
             all_data.append(_get_data(request_input))
             minibatch_shape = Shape(request_input.shape)
             self._minibatch_sizes[internal_id] = minibatch_shape.batch_size
@@ -168,8 +220,11 @@ class BatchedRequests:
     def _split_response_output(
         self, response_output: ResponseOutput
     ) -> Dict[str, ResponseOutput]:
-
         all_data = self._split_data(response_output)
+        if response_output.parameters is not None:
+            all_parameters = self._split_parameters(response_output)
+        else:
+            all_parameters = None
         response_outputs = {}
         for internal_id, data in all_data.items():
             shape = Shape(response_output.shape)
@@ -179,12 +234,16 @@ class BatchedRequests:
                 shape=shape.to_list(),
                 data=data,
                 datatype=response_output.datatype,
-                parameters=response_output.parameters,
+                parameters=(
+                    all_parameters
+                    if all_parameters is None
+                    else all_parameters[internal_id]
+                ),
             )
 
         return response_outputs
 
-    def _split_data(self, response_output: ResponseOutput) -> Dict[str, ResponseOutput]:
+    def _split_data(self, response_output: ResponseOutput) -> Dict[str, Any]:
         merged_shape = Shape(response_output.shape)
         element_size = merged_shape.elem_size
         merged_data = _get_data(response_output)
@@ -198,3 +257,32 @@ class BatchedRequests:
             all_data[internal_id] = data
 
         return all_data
+
+    def _split_parameters(
+        self, response_output: ResponseOutput
+    ) -> Dict[str, Parameters]:
+        merged_parameters = _get_parameters(response_output)
+        idx = 0
+
+        all_parameters = {}
+        # TODO: Don't rely on array to have been flattened
+        for internal_id, minibatch_size in self._minibatch_sizes.items():
+            parameter_args = {}
+            for parameter_name, parameter_values in merged_parameters.items():
+                if parameter_name in ["content_type", "headers"]:
+                    continue
+                try:
+                    parameter_value = parameter_values[idx]
+                    if parameter_value != []:
+                        parameter_args[parameter_name] = str(parameter_value)
+                except IndexError:
+                    pass
+            if "content_type" in merged_parameters.keys():
+                parameter_args["content_type"] = merged_parameters["content_type"]
+            if "headers" in merged_parameters.keys():
+                parameter_args["headers"] = merged_parameters["headers"]
+            parameter_obj = Parameters(**parameter_args)
+            all_parameters[internal_id] = parameter_obj
+            idx += minibatch_size
+
+        return all_parameters

@@ -7,10 +7,11 @@
 *.dylib
 *.pyc
 bin
+*.db
 
 # Mac file system
 **/.DS_Store
- 
+
 # editor and IDE paraphernalia
 .idea
 .vscode
@@ -29,6 +30,8 @@ eggs/
 .tox
 build/
 dist/
+venv/
+.venv/
 
 # Notebook Checkpoints
 .ipynb_checkpoints
@@ -48,13 +51,17 @@ mlruns
 dataset
 lightning_logs
 
+# Runtime: CatBoost
+catboost_info/
 
 # Sphinx documentation
 docs/_build/
 
 # Tests cache folders
+**/tests/testdata/.cache/**
+## The .data path is longer used, but let's keep the line to avoid people
+## pushing their old .data folder by mistake
 runtimes/alibi-explain/tests/.data/**
-runtimes/mlflow/tests/testdata/.cache/**
 
 # Docker metadata
 .docker/

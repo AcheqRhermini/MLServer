@@ -1,4 +1,4 @@
-from typing import Any, Union, Dict, Optional
+from typing import Any, Union, Dict, Optional, List
 
 from ..types import (
     InferenceRequest,
@@ -32,6 +32,17 @@ Parametrised = Union[
 ]
 Tagged = Union[MetadataTensor, ModelSettings]
 DecodedParameterName = "_decoded_payload"
+
+
+def inject_batch_dimension(shape: List[int]) -> List[int]:
+    """
+    Utility method to ensure that 1-dimensional shapes
+    assume that `[N] == [N, D]`.
+    """
+    if len(shape) > 1:
+        return shape
+
+    return shape + [1]
 
 
 def _get_content_type(
@@ -113,7 +124,7 @@ def decode_request_input(
 
 def decode_inference_request(
     inference_request: InferenceRequest,
-    model_settings: ModelSettings = None,
+    model_settings: Optional[ModelSettings] = None,
     metadata_inputs: Dict[str, MetadataTensor] = {},
 ) -> Optional[Any]:
     for request_input in inference_request.inputs:
@@ -176,7 +187,11 @@ class SingleInputRequestCodec(RequestCodec):
 
     @classmethod
     def encode_response(
-        cls, model_name: str, payload: Any, model_version: str = None, **kwargs
+        cls,
+        model_name: str,
+        payload: Any,
+        model_version: Optional[str] = None,
+        **kwargs,
     ) -> InferenceResponse:
         if cls.InputCodec is None:
             raise NotImplementedError(
@@ -187,7 +202,10 @@ class SingleInputRequestCodec(RequestCodec):
             f"{DefaultOutputPrefix}1", payload, **kwargs
         )
         return InferenceResponse(
-            model_name=model_name, model_version=model_version, outputs=[output]
+            model_name=model_name,
+            model_version=model_version,
+            parameters=Parameters(content_type=cls.ContentType),
+            outputs=[output],
         )
 
     @classmethod
@@ -213,7 +231,9 @@ class SingleInputRequestCodec(RequestCodec):
             )
 
         inp = cls.InputCodec.encode_input(f"{DefaultInputPrefix}1", payload, **kwargs)
-        return InferenceRequest(inputs=[inp])
+        return InferenceRequest(
+            inputs=[inp], parameters=Parameters(content_type=cls.ContentType)
+        )
 
     @classmethod
     def decode_request(cls, request: InferenceRequest) -> Any:

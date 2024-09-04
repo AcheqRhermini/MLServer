@@ -1,27 +1,69 @@
 import asyncio
 
+from contextlib import nullcontext
 from multiprocessing import Queue
-from typing import Any, Coroutine, Callable, Dict
+from typing import Awaitable, Callable, Dict, Optional, List, Iterable
 
 from ..model import MLModel
 from ..types import InferenceRequest, InferenceResponse
-from ..settings import Settings
+from ..settings import Settings, ModelSettings
+from ..env import Environment
 
 from .model import ParallelModel
 from .worker import Worker
-from .utils import configure_inference_pool
+from .logging import logger
+from .utils import configure_inference_pool, terminate_queue
 from .messages import (
     ModelResponseMessage,
     ModelUpdateMessage,
     ModelUpdateType,
 )
-from .logging import logger
 from .dispatcher import Dispatcher
 
 
-PredictMethod = Callable[[InferenceRequest], Coroutine[Any, Any, InferenceResponse]]
+PredictMethod = Callable[[InferenceRequest], Awaitable[InferenceResponse]]
+InferencePoolHook = Callable[[Worker], Awaitable[None]]
 
-_InferencePoolAttr = "__inference_pool__"
+
+def _spawn_worker(
+    settings: Settings,
+    responses: Queue,
+    env: Optional[Environment],
+) -> Worker:
+    with env or nullcontext():
+        worker = Worker(settings, responses, env)
+        worker.start()
+
+    return worker
+
+
+class WorkerRegistry:
+    """
+    Simple registry to keep track of which models have been loaded.
+    This can be used to re-load all models when a worker stops unexpectedly.
+    """
+
+    def __init__(self) -> None:
+        self._models: Dict[str, ModelSettings] = {}
+
+    def _key(self, model_settings: ModelSettings) -> str:
+        return f"{model_settings.name}-{model_settings.version}"
+
+    def add(self, model_settings: ModelSettings):
+        model_key = self._key(model_settings)
+        self._models[model_key] = model_settings
+
+    def remove(self, model_settings: ModelSettings):
+        model_key = self._key(model_settings)
+        if model_key in self._models:
+            del self._models[model_key]
+
+    def __len__(self) -> int:
+        return len(self._models)
+
+    @property
+    def models(self) -> Iterable[ModelSettings]:
+        return self._models.values()
 
 
 class InferencePool:
@@ -35,94 +77,137 @@ class InferencePool:
     can occur in parallel across multiple models or instances of a model.
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(
+        self,
+        settings: Settings,
+        env: Optional[Environment] = None,
+        on_worker_stop: List[InferencePoolHook] = [],
+    ):
         configure_inference_pool(settings)
 
+        self._on_worker_stop = on_worker_stop
+        self._env = env
         self._workers: Dict[int, Worker] = {}
+        self._worker_registry = WorkerRegistry()
         self._settings = settings
-        responses: Queue[ModelResponseMessage] = Queue()
-        for idx in range(self._settings.parallel_workers):
-            # TODO: Set callback to restart worker if it goes down (would
-            # `worker.join` help with that?)
-            worker = Worker(settings, responses)
-            worker.start()
+        self._responses: Queue[ModelResponseMessage] = Queue()
+        for _ in range(self._settings.parallel_workers):
+            worker = _spawn_worker(self._settings, self._responses, self._env)
             self._workers[worker.pid] = worker  # type: ignore
 
-        self._dispatcher = Dispatcher(self._workers, responses)
+        self._dispatcher = Dispatcher(self._workers, self._responses)
         self._dispatcher.start()
 
-    async def load_model(self, model: MLModel) -> MLModel:
-        if not self._should_load_model(model):
-            # Skip load if model has disabled parallel workers
-            return model
+    @property
+    def env_hash(self) -> Optional[str]:
+        if not self._env:
+            return None
 
+        return self._env.env_hash
+
+    @property
+    def name(self) -> str:
+        if self.env_hash:
+            return f"inference pool with hash '{self.env_hash}'"
+
+        return "default inference pool"
+
+    async def on_worker_stop(self, pid: int, exit_code: int):
+        if pid not in self._workers:
+            # If this worker didn't belong to this pool, ignore
+            return
+
+        worker = self._workers[pid]
+        logger.warning(
+            f"Worker with PID {worker.pid} on {self.name} stopped "
+            f"unexpectedly with exit code {exit_code}. "
+            "Triggering worker restart..."
+        )
+        self._dispatcher.on_worker_stop(worker, exit_code)
+        if pid in self._workers:
+            # NOTE: worker may be removed by dispatcher
+            del self._workers[pid]
+
+        # Call attached on_worker_stop hooks
+        await asyncio.gather(*[callback(worker) for callback in self._on_worker_stop])
+
+        # Start a new worker
+        await self._start_worker()
+
+    async def _start_worker(self) -> Worker:
+        worker = _spawn_worker(self._settings, self._responses, self._env)
+        logger.info(f"Starting new worker with PID {worker.pid} on {self.name}...")
+
+        # Add to dispatcher so that it can receive load requests and reload all
+        # models
+        self._workers[worker.pid] = worker  # type: ignore
+        await self._dispatcher.on_worker_start(worker)
+
+        await asyncio.gather(
+            *[
+                self._dispatcher.dispatch_update_to_worker(
+                    worker,
+                    ModelUpdateMessage(
+                        update_type=ModelUpdateType.Load,
+                        model_settings=model_settings,  # type: ignore
+                    ),
+                )
+                for model_settings in self._worker_registry.models
+            ]
+        )
+
+        # Once all models are loaded, we notify the dispatcher to reload all
+        # models
+        self._dispatcher.on_worker_ready(worker)
+
+        logger.info(f"New worker with PID {worker.pid} on {self.name} is now ready.")
+        return worker
+
+    async def load_model(self, model: MLModel) -> MLModel:
         load_message = ModelUpdateMessage(
             update_type=ModelUpdateType.Load,
             model_settings=model.settings,  # type: ignore
         )
-        await asyncio.gather(
-            *[worker.send_update(load_message) for worker in self._workers.values()]
-        )
+        await self._dispatcher.dispatch_update(load_message)
 
+        self._worker_registry.add(model.settings)
         return ParallelModel(model, self._dispatcher)
 
     async def reload_model(self, old_model: MLModel, new_model: MLModel) -> MLModel:
         # The model registries within each worker will take care of reloading
         # the model internally
+        self._worker_registry.remove(old_model.settings)
+        self._worker_registry.add(new_model.settings)
         return await self.load_model(new_model)
 
     async def unload_model(self, model: MLModel) -> MLModel:
-        if not self._should_load_model(model):
-            # Skip unload if model has disabled parallel workers
-            return model
-
         unload_message = ModelUpdateMessage(
             update_type=ModelUpdateType.Unload,
             model_settings=model.settings,  # type: ignore
         )
-        await asyncio.gather(
-            *[worker.send_update(unload_message) for worker in self._workers.values()]
-        )
+        await self._dispatcher.dispatch_update(unload_message)
 
+        self._worker_registry.remove(model.settings)
         return ParallelModel(model, self._dispatcher)
 
-    def _should_load_model(self, model: MLModel):
-        if model.settings.parallel_workers is not None:
-            logger.warning(
-                "DEPRECATED!! The `parallel_workers` setting at the model-level "
-                "has now been deprecated and moved "
-                "to the top-level server "
-                "settings. "
-                "This field will be removed in MLServer 1.2.0. "
-                "To access the new field, you can either update the "
-                "`settings.json` file, or update the `MLSERVER_PARALLEL_WORKERS` "
-                "environment variable. "
-                f"The current value of the server-level's `parallel_workers` field is "
-                f"'{self._settings.parallel_workers}'."
-            )
-
-            # NOTE: This is a remnant from the previous architecture for parallel
-            # workers, where each worker had its own pool.
-            # For backwards compatibility, we will respect when a model disables
-            # parallel inference.
-            if model.settings.parallel_workers <= 0:
-                return False
-
-        if not self._settings.parallel_workers:
-            return False
-
-        return True
+    def empty(self) -> bool:
+        return len(self._worker_registry) == 0
 
     async def close(self):
-        logger.info("Waiting for inference pool shutdown")
         await self._close_workers()
+        await terminate_queue(self._responses)
+        self._responses.close()
         await self._dispatcher.stop()
-        logger.info("Inference pool shutdown complete")
 
     async def _close_workers(self):
         # First close down model updates loop
         for pid, worker in self._workers.items():
             await worker.stop()
-            worker.join()
+            worker.join(self._settings.parallel_workers_timeout)
+            if worker.exitcode is None:
+                worker.kill()
+            await asyncio.gather(
+                *[callback(worker) for callback in self._on_worker_stop]
+            )
 
         self._workers.clear()

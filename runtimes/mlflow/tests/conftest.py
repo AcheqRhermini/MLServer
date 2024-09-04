@@ -3,7 +3,9 @@ import mlflow
 import pytest
 import asyncio
 import numpy as np
+import pandas as pd
 
+from filelock import FileLock
 from sklearn.dummy import DummyClassifier
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -14,7 +16,7 @@ from mlserver.utils import install_uvloop_event_loop
 
 from mlserver_mlflow import MLflowRuntime
 
-from torch_fixtures import MNISTDataModule, LightningMNISTClassifier
+from .torch_fixtures import MNISTDataModule, LightningMNISTClassifier
 
 TESTS_PATH = os.path.dirname(__file__)
 TESTDATA_PATH = os.path.join(TESTS_PATH, "testdata")
@@ -33,18 +35,21 @@ def event_loop():
 @pytest.fixture
 def dataset() -> tuple:
     n = 4
-    X = np.random.rand(n)
+    X = pd.DataFrame({"foo": np.random.rand(n)})
     y = np.random.rand(n)
 
     return X, y
 
 
 @pytest.fixture
-def model_signature(dataset: tuple) -> ModelSignature:
-    X, y = dataset
-    signature = infer_signature(X, y)
+def default_inference_params() -> dict:
+    return {"foo_param": "foo_value"}
 
-    signature.inputs.inputs[0]._name = "foo"
+
+@pytest.fixture
+def model_signature(dataset: tuple, default_inference_params: dict) -> ModelSignature:
+    X, y = dataset
+    signature = infer_signature(X, model_output=y, params=default_inference_params)
 
     return signature
 
@@ -63,33 +68,48 @@ def model_uri(tmp_path: str, dataset: tuple, model_signature: ModelSignature) ->
 
 
 @pytest.fixture
-def pytorch_model_uri() -> str:
-    model_path = os.path.join(TESTDATA_CACHE_PATH, "pytorch-model")
-    if os.path.exists(model_path):
-        return model_path
+def testdata_cache_path() -> str:
+    if not os.path.exists(TESTDATA_CACHE_PATH):
+        os.makedirs(TESTDATA_CACHE_PATH, exist_ok=True)
 
-    model = LightningMNISTClassifier(batch_size=64, num_workers=3, lr=0.001)
+    return TESTDATA_CACHE_PATH
 
-    dm = MNISTDataModule(batch_size=64, num_workers=3)
-    dm.setup(stage="fit")
 
-    early_stopping = EarlyStopping(
-        monitor="val_loss",
-        mode="min",
-        verbose=False,
-        patience=3,
-    )
+@pytest.fixture
+def pytorch_model_uri(
+    testdata_cache_path: str,
+) -> str:
+    model_path = os.path.join(testdata_cache_path, "pytorch-model")
 
-    trainer = Trainer(callbacks=[early_stopping])
-    trainer.fit(model, dm)
+    # NOTE: Lock to avoid race conditions when running tests in parallel
+    with FileLock(f"{model_path}.lock"):
+        if os.path.exists(model_path):
+            return model_path
 
-    mlflow.pytorch.save_model(model, path=model_path)
+        model = LightningMNISTClassifier(batch_size=64, num_workers=3, lr=0.001)
+
+        dm = MNISTDataModule(batch_size=64, num_workers=3)
+        dm.setup(stage="fit")
+
+        early_stopping = EarlyStopping(
+            monitor="val_loss",
+            mode="min",
+            verbose=False,
+            patience=3,
+        )
+
+        trainer = Trainer(callbacks=[early_stopping])
+        trainer.fit(model, dm)
+
+        mlflow.pytorch.save_model(model, path=model_path)
 
     return model_path
 
 
-@pytest.fixture
-def model_settings(model_uri: str) -> ModelSettings:
+@pytest.fixture(params=["", "file:"])
+def model_settings(model_uri: str, request: pytest.FixtureRequest) -> ModelSettings:
+    scheme = request.param
+    model_uri = scheme + model_uri
     return ModelSettings(
         name="mlflow-model",
         implementation=MLflowRuntime,
@@ -109,7 +129,7 @@ def model_settings_pytorch_fixed(pytorch_model_uri) -> ModelSettings:
 @pytest.fixture
 async def runtime(model_settings: ModelSettings) -> MLflowRuntime:
     model = MLflowRuntime(model_settings)
-    await model.load()
+    model.ready = await model.load()
 
     return model
 
@@ -117,7 +137,7 @@ async def runtime(model_settings: ModelSettings) -> MLflowRuntime:
 @pytest.fixture
 async def runtime_pytorch(model_settings_pytorch_fixed: ModelSettings) -> MLflowRuntime:
     model = MLflowRuntime(model_settings_pytorch_fixed)
-    await model.load()
+    model.ready = await model.load()
 
     return model
 

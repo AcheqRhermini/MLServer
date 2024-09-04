@@ -1,10 +1,11 @@
 import json
 
+from asyncio import CancelledError
 from enum import IntEnum
-from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Dict, List, Optional, Union
 
-from ..utils import get_import_path
+from ..utils import generate_uuid
 from ..settings import ModelSettings
 
 
@@ -13,8 +14,15 @@ class ModelUpdateType(IntEnum):
     Unload = 2
 
 
-class ModelRequestMessage(BaseModel):
-    id: str
+class Message(BaseModel):
+    model_config = ConfigDict(
+        protected_namespaces=(),
+    )
+
+    id: str = Field(default_factory=generate_uuid)
+
+
+class ModelRequestMessage(Message):
     model_name: str
     model_version: Optional[str] = None
     method_name: str
@@ -22,31 +30,29 @@ class ModelRequestMessage(BaseModel):
     method_kwargs: Dict[str, Any] = {}
 
 
-class ModelResponseMessage(BaseModel):
-    class Config:
-        # This is to allow having an Exception field
-        arbitrary_types_allowed = True
+class ModelResponseMessage(Message):
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+    )
 
-    id: str
-    return_value: Optional[Any]
-    exception: Optional[Exception]
+    return_value: Optional[Any] = None
+    exception: Optional[Union[Exception, CancelledError]] = None
 
 
-class ModelUpdateMessage(BaseModel):
+class ModelUpdateMessage(Message):
     update_type: ModelUpdateType
     serialised_model_settings: str
 
     def __init__(self, *args, **kwargs):
         model_settings = kwargs.pop("model_settings", None)
         if model_settings:
-            as_dict = model_settings.dict()
+            as_dict = model_settings.model_dump(by_alias=True)
             # Ensure the private `_source` attr also gets serialised
             if model_settings._source:
                 as_dict["_source"] = model_settings._source
 
-            import_path = get_import_path(model_settings.implementation)
-            as_dict["implementation"] = import_path
             kwargs["serialised_model_settings"] = json.dumps(as_dict)
+
         return super().__init__(*args, **kwargs)
 
     @property

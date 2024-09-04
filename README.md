@@ -8,7 +8,7 @@ An open source inference server for your machine learning models.
 
 MLServer aims to provide an easy way to start serving your machine learning
 models through a REST and gRPC interface, fully compliant with [KFServing's V2
-Dataplane](https://kserve.github.io/website/modelserving/inference_api/)
+Dataplane](https://docs.seldon.io/projects/seldon-core/en/latest/reference/apis/v2-protocol.html)
 spec. Watch a quick video introducing the project [here](https://www.youtube.com/watch?v=aZHe3z-8C_w).
 
 - Multi-model serving, letting users run multiple models within the same
@@ -24,11 +24,11 @@ spec. Watch a quick video introducing the project [here](https://www.youtube.com
   [KServe (formerly known as KFServing)](https://kserve.github.io/website/modelserving/v1beta1/sklearn/v2/), where
   MLServer is the core Python inference server used to serve machine learning
   models.
-- Support for the standard [V2 Inference Protocol](https://kserve.github.io/website/modelserving/inference_api/) on
+- Support for the standard [V2 Inference Protocol](https://docs.seldon.io/projects/seldon-core/en/latest/reference/apis/v2-protocol.html) on
   both the gRPC and REST flavours, which has been standardised and adopted by
   various model serving frameworks.
 
-You can read more about the goals of this project on the [inital design
+You can read more about the goals of this project on the [initial design
 document](https://docs.google.com/document/d/1C2uf4SaAtwLTlBCciOhvdiKQ2Eay4U72VxAD4bXe7iU/edit?usp=sharing).
 
 ## Usage
@@ -69,16 +69,39 @@ runtimes](./docs/runtimes/custom.md)**.
 
 Out of the box, MLServer provides support for:
 
-| Framework    | Supported | Documentation                                                    |
-| ------------ | --------- | ---------------------------------------------------------------- |
-| Scikit-Learn | ✅        | [MLServer SKLearn](./runtimes/sklearn)                           |
-| XGBoost      | ✅        | [MLServer XGBoost](./runtimes/xgboost)                           |
-| Spark MLlib  | ✅        | [MLServer MLlib](./runtimes/mllib)                               |
-| LightGBM     | ✅        | [MLServer LightGBM](./runtimes/lightgbm)                         |
-| Tempo        | ✅        | [`github.com/SeldonIO/tempo`](https://github.com/SeldonIO/tempo) |
-| MLflow       | ✅        | [MLServer MLflow](./runtimes/mlflow)                             |
-| Alibi-Detect | ✅        | [MLServer Alibi Detect](./runtimes/alibi-detect)                 |
-| HuggingFace  | ✅        | [MLServer HuggingFace](./runtimes/huggingface)                   |
+| Framework     | Supported | Documentation                                                    |
+| ------------- | --------- | ---------------------------------------------------------------- |
+| Scikit-Learn  | ✅        | [MLServer SKLearn](./runtimes/sklearn)                           |
+| XGBoost       | ✅        | [MLServer XGBoost](./runtimes/xgboost)                           |
+| Spark MLlib   | ✅        | [MLServer MLlib](./runtimes/mllib)                               |
+| LightGBM      | ✅        | [MLServer LightGBM](./runtimes/lightgbm)                         |
+| CatBoost      | ✅        | [MLServer CatBoost](./runtimes/catboost)                         |
+| Tempo         | ✅        | [`github.com/SeldonIO/tempo`](https://github.com/SeldonIO/tempo) |
+| MLflow        | ✅        | [MLServer MLflow](./runtimes/mlflow)                             |
+| Alibi-Detect  | ✅        | [MLServer Alibi Detect](./runtimes/alibi-detect)                 |
+| Alibi-Explain | ✅        | [MLServer Alibi Explain](./runtimes/alibi-explain)               |
+| HuggingFace   | ✅        | [MLServer HuggingFace](./runtimes/huggingface)                   |
+
+MLServer is licensed under the Apache License, Version 2.0. However please note that software used in conjunction with, or alongside, MLServer may be licensed under different terms. For example, Alibi Detect and Alibi Explain are both licensed under the Business Source License 1.1. For more information about the legal terms of products that are used in conjunction with or alongside MLServer, please refer to their respective documentation.
+
+## Supported Python Versions
+
+🔴 Unsupported
+
+🟠 Deprecated: To be removed in a future version
+
+🟢 Supported
+
+🔵 Untested
+
+| Python Version | Status |
+| -------------- | ------ |
+| 3.7            | 🔴     |
+| 3.8            | 🔴     |
+| 3.9            | 🟢     |
+| 3.10           | 🟢     |
+| 3.11           | 🔵     |
+| 3.12           | 🔵     |
 
 ## Examples
 
@@ -90,6 +113,7 @@ MLServer to start serving your machine learning models.
 - [Serving a `scikit-learn` model](./docs/examples/sklearn/README.md)
 - [Serving a `xgboost` model](./docs/examples/xgboost/README.md)
 - [Serving a `lightgbm` model](./docs/examples/lightgbm/README.md)
+- [Serving a `catboost` model](./docs/examples/catboost/README.md)
 - [Serving a `tempo` pipeline](./docs/examples/tempo/README.md)
 - [Serving a custom model](./docs/examples/custom/README.md)
 - [Serving an `alibi-detect` model](./docs/examples/alibi-detect/README.md)
@@ -106,8 +130,24 @@ packages](./docs/runtimes/index.md) try to follow the same versioning schema.
 To bump the version across all of them, you can use the
 [`./hack/update-version.sh`](./hack/update-version.sh) script.
 
+We generally keep the version as a placeholder for an upcoming version.
+
 For example:
 
 ```bash
 ./hack/update-version.sh 0.2.0.dev1
+```
+
+### Testing
+
+To run all of the tests for MLServer and the runtimes, use:
+
+```bash
+make test
+```
+
+To run run tests for a single file, use something like:
+
+```bash
+tox -e py3 -- tests/batch_processing/test_rest.py
 ```

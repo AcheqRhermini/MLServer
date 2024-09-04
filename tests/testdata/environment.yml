@@ -1,6 +1,8 @@
 name: custom-runtime-environment
+channels:
+  - conda-forge
 dependencies:
-  - python == 3.7
-  - scikit-learn
+  - python == 3.9
+  - scikit-learn == 1.0.2
   - pip:
-      - mlserver == 1.2.0.dev6
+      - mlserver @ git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git@${GITHUB_REF}

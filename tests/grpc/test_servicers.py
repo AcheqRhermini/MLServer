@@ -1,5 +1,7 @@
-import pytest
 import grpc
+import pytest
+from pytest_lazyfixture import lazy_fixture
+
 
 from mlserver.cloudevents import (
     CLOUDEVENTS_HEADER_SPECVERSION_DEFAULT,
@@ -12,6 +14,7 @@ from mlserver.grpc.converters import (
     InferOutputTensorConverter,
 )
 from mlserver.raw import pack, unpack
+from mlserver.types import Datatype
 from mlserver import __version__
 
 
@@ -60,7 +63,10 @@ async def test_model_metadata(inference_service_stub, sum_model_settings):
     "model_name,model_version", [("sum-model", "v1.2.3"), ("sum-model", None)]
 )
 async def test_model_infer(
-    inference_service_stub, model_infer_request, model_name, model_version
+    inference_service_stub,
+    model_infer_request,
+    model_name,
+    model_version,
 ):
     model_infer_request.model_name = model_name
     if model_version is not None:
@@ -69,11 +75,46 @@ async def test_model_infer(
         model_infer_request.ClearField("model_version")
 
     prediction = await inference_service_stub.ModelInfer(model_infer_request)
-
     expected = pb.InferTensorContents(int64_contents=[6])
 
     assert len(prediction.outputs) == 1
     assert prediction.outputs[0].contents == expected
+
+
+@pytest.mark.parametrize("settings", [lazy_fixture("settings_stream")])
+@pytest.mark.parametrize(
+    "sum_model_settings", [lazy_fixture("text_stream_model_settings")]
+)
+@pytest.mark.parametrize("sum_model", [lazy_fixture("text_stream_model")])
+@pytest.mark.parametrize(
+    "model_name,model_version",
+    [("text-stream-model", "v1.2.3"), ("text-stream-model", None)],
+)
+async def test_model_stream_infer(
+    inference_service_stub,
+    model_generate_request,
+    model_name,
+    model_version,
+):
+    model_generate_request.model_name = model_name
+    if model_version is not None:
+        model_generate_request.model_version = model_version
+    else:
+        model_generate_request.ClearField("model_version")
+
+    i = -1
+    text = ["What", " is", " the", " capital", " of", " France?"]
+
+    async def get_stream_request(request):
+        yield request
+
+    async for prediction in inference_service_stub.ModelStreamInfer(
+        get_stream_request(model_generate_request)
+    ):
+        i += 1
+        expected = pb.InferTensorContents(bytes_contents=[text[i].encode()])
+        assert len(prediction.outputs) == 1
+        assert prediction.outputs[0].contents == expected
 
 
 async def test_model_infer_raw_contents(inference_service_stub, model_infer_request):
@@ -93,7 +134,7 @@ async def test_model_infer_raw_contents(inference_service_stub, model_infer_requ
         response_output = InferOutputTensorConverter.to_types(output_tensor)
         data = unpack(response_output, raw_output)
         contents = InferTensorContentsConverter.from_types(
-            data, response_output.datatype
+            data, Datatype(response_output.datatype)
         )
         output_tensor.contents.CopyFrom(contents)
 
@@ -104,7 +145,9 @@ async def test_model_infer_raw_contents(inference_service_stub, model_infer_requ
 
 
 async def test_model_infer_headers(
-    inference_service_stub, model_infer_request, sum_model_settings
+    inference_service_stub,
+    model_infer_request,
+    sum_model_settings,
 ):
     model_infer_request.model_name = sum_model_settings.name
     model_infer_request.ClearField("model_version")
@@ -135,8 +178,29 @@ async def test_model_infer_error(inference_service_stub, model_infer_request):
     assert err.value.details() == "Model my-model with version v1.2.3 not found"
 
 
+@pytest.mark.parametrize("settings", [lazy_fixture("settings_stream")])
+@pytest.mark.parametrize(
+    "sum_model_settings", [lazy_fixture("text_stream_model_settings")]
+)
+@pytest.mark.parametrize("sum_model", [lazy_fixture("text_stream_model")])
+async def test_model_stream_infer_error(inference_service_stub, model_generate_request):
+    async def get_stream_request(request):
+        yield request
+
+    with pytest.raises(grpc.RpcError) as err:
+        model_generate_request.model_name = "my-model"
+        async for _ in inference_service_stub.ModelStreamInfer(
+            get_stream_request(model_generate_request)
+        ):
+            pass
+
+    assert err.value.code() == grpc.StatusCode.NOT_FOUND
+    assert err.value.details() == "Model my-model with version v1.2.3 not found"
+
+
 async def test_model_repository_index(
-    inference_service_stub, grpc_repository_index_request
+    inference_service_stub,
+    grpc_repository_index_request,
 ):
     index = await inference_service_stub.RepositoryIndex(grpc_repository_index_request)
 
@@ -153,11 +217,13 @@ async def test_model_repository_unload(inference_service_stub, sum_model_setting
         )
 
 
-async def test_model_repository_load(inference_service_stub, sum_model_settings):
+async def test_model_repository_load(
+    inference_service_stub,
+    sum_model_settings,
+):
     await inference_service_stub.RepositoryModelUnload(
         pb.RepositoryModelLoadRequest(model_name=sum_model_settings.name)
     )
-
     load_request = pb.RepositoryModelLoadRequest(model_name=sum_model_settings.name)
     await inference_service_stub.RepositoryModelLoad(load_request)
 
@@ -175,3 +241,24 @@ async def test_model_repository_load_error(inference_service_stub, sum_model_set
 
     assert err.value.code() == grpc.StatusCode.NOT_FOUND
     assert err.value.details() == "Model my-model not found"
+
+
+async def test_infer_invalid_datatype_error(
+    inference_service_stub,
+    model_infer_request_invalid_datatype,
+):
+    model_infer_request_invalid_datatype.model_name = "sum-model"
+    model_infer_request_invalid_datatype.ClearField("model_version")
+
+    with pytest.raises(grpc.aio.AioRpcError) as exc_info:
+        _ = await inference_service_stub.ModelInfer(
+            model_infer_request_invalid_datatype
+        )
+
+    assert exc_info.value.details() == (
+        "1 validation error for RequestInput\ndatatype\n  Input should be "
+        "'BOOL', 'UINT8', 'UINT16', 'UINT32', 'UINT64', 'INT8', 'INT16', "
+        "'INT32', 'INT64', 'FP16', 'FP32', 'FP64' or 'BYTES' [type=enum, "
+        "input_value='INT322', input_type=str]\n    For further "
+        "information visit https://errors.pydantic.dev/2.7/v/enum"
+    )

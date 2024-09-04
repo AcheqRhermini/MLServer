@@ -1,9 +1,10 @@
 import os
 import uuid
 import asyncio
+import urllib.parse
 
 from asyncio import Task
-from typing import Callable, Dict, Optional, List, Type
+from typing import Callable, Dict, Optional, List
 
 from .logging import logger
 from .types import InferenceRequest, InferenceResponse, Parameters
@@ -21,32 +22,37 @@ async def get_model_uri(
     if not model_uri:
         raise InvalidModelURI(settings.name)
 
-    full_model_uri = _to_absolute_path(settings._source, model_uri)
-    if os.path.isfile(full_model_uri):
-        return full_model_uri
+    model_uri_components = urllib.parse.urlparse(model_uri, scheme="file")
+    if model_uri_components.scheme != "file":
+        return model_uri
 
-    if os.path.isdir(full_model_uri):
-        # If full_model_uri is a folder, search for a well-known model filename
+    full_model_path = to_absolute_path(settings, model_uri_components.path)
+    if os.path.isfile(full_model_path):
+        return full_model_path
+
+    if os.path.isdir(full_model_path):
+        # If full_model_path is a folder, search for a well-known model filename
         for fname in wellknown_filenames:
-            model_path = os.path.join(full_model_uri, fname)
+            model_path = os.path.join(full_model_path, fname)
             if os.path.isfile(model_path):
                 return model_path
 
         # If none, return the folder
-        return full_model_uri
+        return full_model_path
 
     # Otherwise, the uri is neither a file nor a folder
-    raise InvalidModelURI(settings.name, full_model_uri)
+    raise InvalidModelURI(settings.name, full_model_path)
 
 
-def _to_absolute_path(source: Optional[str], model_uri: str) -> str:
+def to_absolute_path(model_settings: ModelSettings, uri: str) -> str:
+    source = model_settings._source
     if source is None:
         # Treat path as either absolute or relative to the working directory of
         # the MLServer instance
-        return model_uri
+        return uri
 
     parent_folder = os.path.dirname(source)
-    unnormalised = os.path.join(parent_folder, model_uri)
+    unnormalised = os.path.join(parent_folder, uri)
     return os.path.normpath(unnormalised)
 
 
@@ -121,14 +127,10 @@ def install_uvloop_event_loop():
 
     policy = _check_current_event_loop_policy()
 
-    logger.info(f"Using asyncio event-loop policy: {policy}")
+    logger.debug(f"Using asyncio event-loop policy: {policy}")
 
 
 def schedule_with_callback(coro, cb) -> Task:
     task = asyncio.create_task(coro)
     task.add_done_callback(cb)
     return task
-
-
-def get_import_path(klass: Type):
-    return f"{klass.__module__}.{klass.__name__}"

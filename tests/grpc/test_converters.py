@@ -100,7 +100,7 @@ def test_modelinferrequest_to_types(model_infer_request):
                 name="input-0",
                 datatype="INT32",
                 shape=[1, 3],
-                data=types.TensorData.parse_obj([1, 2, 3]),
+                data=types.TensorData.model_validate([1, 2, 3]),
                 parameters=types.Parameters(content_type="np"),
             )
         ],
@@ -154,7 +154,7 @@ def test_modelinferrequest_from_types(use_raw, expected):
                 name="input-0",
                 datatype="FP32",
                 shape=[1],
-                data=types.TensorData.parse_obj([21.0]),
+                data=types.TensorData.model_validate([21.0]),
             )
         ],
     )
@@ -250,14 +250,16 @@ def test_modelinferresponse_from_types(inference_response, use_raw, expected):
 )
 def test_modelinferresponse_to_types(model_infer_response):
     expected = types.InferenceResponse(
-        id="",
         model_name="foo",
+        model_version=None,
+        id="",
+        parameters=None,
         outputs=[
             types.ResponseOutput(
                 name="input-0",
-                datatype="INT32",
                 shape=[1, 3],
-                parameters=types.Parameters(content_type="np"),
+                datatype="INT32",
+                parameters=types.Parameters(content_type="np", headers=None),
                 data=[1, 2, 3],
             )
         ],
@@ -345,5 +347,5 @@ def test_repositoryindexresponse_from_types(repository_index_response):
         assert isinstance(grpc_model, pb.RepositoryIndexResponse.ModelIndex)
         assert expected.name == grpc_model.name
         assert expected.version == grpc_model.version
-        assert expected.state.value == grpc_model.state
+        assert expected.state == grpc_model.state
         assert expected.reason == grpc_model.reason

@@ -4,12 +4,13 @@ from typing import Callable, Awaitable, List, Dict, Optional
 from itertools import chain
 from functools import cmp_to_key
 
+from .context import model_context
 from .model import MLModel
 from .errors import ModelNotFound
-from .types import RepositoryIndexResponse
 from .logging import logger
 from .settings import ModelSettings
 
+ModelInitialiser = Callable[[ModelSettings], MLModel]
 ModelRegistryHook = Callable[[MLModel], Awaitable[MLModel]]
 ModelReloadHook = Callable[[MLModel, MLModel], Awaitable[MLModel]]
 
@@ -47,6 +48,11 @@ def _is_newer(a: MLModel, b: MLModel) -> int:
             return 0
 
 
+def model_initialiser(model_settings: ModelSettings) -> MLModel:
+    model_class = model_settings.implementation
+    return model_class(model_settings)  # type: ignore
+
+
 class SingleModelRegistry:
     """
     Registry for a single model with multiple versions.
@@ -58,6 +64,7 @@ class SingleModelRegistry:
         on_model_load: List[ModelRegistryHook] = [],
         on_model_reload: List[ModelReloadHook] = [],
         on_model_unload: List[ModelRegistryHook] = [],
+        model_initialiser: ModelInitialiser = model_initialiser,
     ):
         self._versions: Dict[str, MLModel] = {}
         self._default: Optional[MLModel] = None
@@ -66,6 +73,7 @@ class SingleModelRegistry:
         self._on_model_load = on_model_load
         self._on_model_reload = on_model_reload
         self._on_model_unload = on_model_unload
+        self._model_initialiser = model_initialiser
 
     @property
     def default(self) -> Optional[MLModel]:
@@ -86,7 +94,9 @@ class SingleModelRegistry:
     def _clear_default(self):
         self._default = None
 
-    def _refresh_default(self, new_model: MLModel = None) -> Optional[MLModel]:
+    def _refresh_default(
+        self, new_model: Optional[MLModel] = None
+    ) -> Optional[MLModel]:
         if new_model:
             # Check whether new model is "defaulter" than current default
             # NOTE: This should help to avoid iterating through all versioned
@@ -125,40 +135,45 @@ class SingleModelRegistry:
         self._default = self._find_default()
         return self._default
 
-    async def index(self) -> RepositoryIndexResponse:
-        pass
-
     async def load(self, model_settings: ModelSettings) -> MLModel:
         # If there's a previously loaded model, we'll need to unload it at the
         # end
         previous_version = _get_version(model_settings)
         previous_loaded_model = self._find_model(previous_version)
 
-        model_class = model_settings.implementation
-        new_model = model_class(model_settings)  # type: ignore
+        new_model = self._model_initialiser(model_settings)
 
-        if previous_loaded_model:
-            await self._reload_model(previous_loaded_model, new_model)
-        else:
-            await self._load_model(new_model)
+        with model_context(model_settings):
+            if previous_loaded_model:
+                await self._reload_model(previous_loaded_model, new_model)
+            else:
+                await self._load_model(new_model)
 
         return new_model
 
     async def _load_model(self, model: MLModel):
-        # Register the model before loading it, to ensure that the model
-        # appears as a not-ready (i.e. loading) model
-        self._register(model)
+        try:
+            # Register the model before loading it, to ensure that the model
+            # appears as a not-ready (i.e. loading) model
+            self._register(model)
 
-        for callback in self._on_model_load:
-            # NOTE: Callbacks need to be executed sequentially to ensure that
-            # they go in the right order
-            model = await callback(model)
+            for callback in self._on_model_load:
+                # NOTE: Callbacks need to be executed sequentially to ensure that
+                # they go in the right order
+                model = await callback(model)
 
-        # Register model again to ensure we save version modified by hooks
-        self._register(model)
-        await model.load()
+            # Register model again to ensure we save version modified by hooks
+            self._register(model)
+            model.ready = await model.load()
 
-        logger.info(f"Loaded model '{model.name}' succesfully.")
+            logger.info(f"Loaded model '{model.name}' successfully.")
+        except Exception:
+            logger.info(
+                f"Couldn't load model '{model.name}'. "
+                "Model will be removed from registry."
+            )
+            await self._unload_model(model)
+            raise
 
     async def _reload_model(self, old_model: MLModel, new_model: MLModel):
         for callback in self._on_model_reload:
@@ -167,13 +182,14 @@ class SingleModelRegistry:
         # Loading the model before unloading the old one - this will ensure
         # that at least one is available (sort of mimicking a rolling
         # deployment)
-        await new_model.load()
+        new_model.ready = await new_model.load()
         self._register(new_model)
 
         if old_model == self.default:
             self._clear_default()
 
-        logger.info(f"Reloaded model '{new_model.name}' succesfully.")
+        old_model.ready = not await old_model.unload()
+        logger.info(f"Reloaded model '{new_model.name}' successfully.")
 
     async def unload(self):
         models = await self.get_models()
@@ -182,31 +198,36 @@ class SingleModelRegistry:
         self._versions.clear()
         self._clear_default()
 
-    async def unload_version(self, version: str = None):
-        if version:
-            model = await self.get_model(version)
-            await self._unload_model(model)
-            del self._versions[version]
+        logger.info(f"Unloaded all versions of model '{self._name}' successfully.")
+
+    async def unload_version(self, version: Optional[str] = None):
+        model = await self.get_model(version)
+        await self._unload_model(model)
+
+    async def _unload_model(self, model: MLModel):
+        with model_context(model.settings):
+            # NOTE: Every callback needs to run to ensure one doesn't block the
+            # others
+            await asyncio.gather(
+                *[callback(model) for callback in self._on_model_unload],
+                return_exceptions=True,
+            )
+
+            if model.version:
+                del self._versions[model.version]
 
             if model == self.default:
                 self._clear_default()
 
-        elif self.default and not self.default.version:
-            # If version is None, and default model doesn't have a version,
-            # then unload and find a new default
-            await self._unload_model(self.default)
-            self._clear_default()
+            model.ready = not await model.unload()
 
-    async def _unload_model(self, model: MLModel, new_model: MLModel = None):
-        for callback in self._on_model_unload:
-            await callback(model)
+            model_msg = f"model '{model.name}'"
+            if model.version:
+                model_msg = f"version {model.version} of {model_msg}"
 
-        if model == self.default:
-            self._clear_default()
+            logger.info(f"Unloaded {model_msg} successfully.")
 
-        logger.info(f"Unloaded model '{model.name}' succesfully.")
-
-    def _find_model(self, version: str = None) -> Optional[MLModel]:
+    def _find_model(self, version: Optional[str] = None) -> Optional[MLModel]:
         if version:
             if version not in self._versions:
                 return None
@@ -215,7 +236,7 @@ class SingleModelRegistry:
 
         return self.default
 
-    async def get_model(self, version: str = None) -> MLModel:
+    async def get_model(self, version: Optional[str] = None) -> MLModel:
         model = self._find_model(version)
 
         if model is None:
@@ -257,11 +278,13 @@ class MultiModelRegistry:
         on_model_load: List[ModelRegistryHook] = [],
         on_model_reload: List[ModelReloadHook] = [],
         on_model_unload: List[ModelRegistryHook] = [],
+        model_initialiser: ModelInitialiser = model_initialiser,
     ):
         self._models: Dict[str, SingleModelRegistry] = {}
         self._on_model_load = on_model_load
         self._on_model_reload = on_model_reload
         self._on_model_unload = on_model_unload
+        self._model_initialiser = model_initialiser
 
     async def load(self, model_settings: ModelSettings) -> MLModel:
         if model_settings.name not in self._models:
@@ -270,6 +293,7 @@ class MultiModelRegistry:
                 on_model_load=self._on_model_load,
                 on_model_reload=self._on_model_reload,
                 on_model_unload=self._on_model_unload,
+                model_initialiser=self._model_initialiser,
             )
 
         return await self._models[model_settings.name].load(model_settings)
@@ -279,17 +303,17 @@ class MultiModelRegistry:
         await model_registry.unload()
         del self._models[name]
 
-    async def unload_version(self, name: str, version: str = None):
+    async def unload_version(self, name: str, version: Optional[str] = None):
         model_registry = self._get_model_registry(name, version)
         await model_registry.unload_version(version)
         if model_registry.empty():
             del self._models[name]
 
-    async def get_model(self, name: str, version: str = None) -> MLModel:
+    async def get_model(self, name: str, version: Optional[str] = None) -> MLModel:
         model_registry = self._get_model_registry(name, version)
         return await model_registry.get_model(version)
 
-    async def get_models(self, name: str = None) -> List[MLModel]:
+    async def get_models(self, name: Optional[str] = None) -> List[MLModel]:
         if name is not None:
             model_registry = self._get_model_registry(name)
             return await model_registry.get_models()
@@ -301,7 +325,7 @@ class MultiModelRegistry:
         return chain.from_iterable(models_list)  # type: ignore
 
     def _get_model_registry(
-        self, name: str, version: str = None
+        self, name: str, version: Optional[str] = None
     ) -> SingleModelRegistry:
         if name not in self._models:
             raise ModelNotFound(name, version)

@@ -1,4 +1,5 @@
 from typing import Any, Union, Mapping, Optional
+from ..types import Datatype
 
 from . import dataplane_pb2 as pb
 from . import model_repository_pb2 as mr_pb
@@ -7,23 +8,23 @@ from .. import types
 from ..raw import extract_raw, inject_raw
 
 _FIELDS = {
-    "BOOL": "bool_contents",
-    "UINT8": "uint_contents",
-    "UINT16": "uint_contents",
-    "UINT32": "uint_contents",
-    "UINT64": "uint64_contents",
-    "INT8": "int_contents",
-    "INT16": "int_contents",
-    "INT32": "int_contents",
-    "INT64": "int64_contents",
-    "FP16": "bytes_contents",
-    "FP32": "fp32_contents",
-    "FP64": "fp64_contents",
-    "BYTES": "bytes_contents",
+    Datatype.BOOL: "bool_contents",
+    Datatype.UINT8: "uint_contents",
+    Datatype.UINT16: "uint_contents",
+    Datatype.UINT32: "uint_contents",
+    Datatype.UINT64: "uint64_contents",
+    Datatype.INT8: "int_contents",
+    Datatype.INT16: "int_contents",
+    Datatype.INT32: "int_contents",
+    Datatype.INT64: "int64_contents",
+    Datatype.FP16: "bytes_contents",
+    Datatype.FP32: "fp32_contents",
+    Datatype.FP64: "fp64_contents",
+    Datatype.BYTES: "bytes_contents",
 }
 
 
-def _get_value(pb_object, default: Any = None) -> Any:
+def _get_value(pb_object, default: Optional[Any] = None) -> Any:
     fields = pb_object.ListFields()
     if len(fields) == 0:
         return default
@@ -132,7 +133,7 @@ class TensorMetadataConverter:
     ) -> pb.ModelMetadataResponse.TensorMetadata:
         tensor_metadata = pb.ModelMetadataResponse.TensorMetadata(
             name=type_object.name,
-            datatype=type_object.datatype,
+            datatype=str(type_object.datatype),
             shape=type_object.shape,
         )
 
@@ -234,9 +235,9 @@ class InferInputTensorConverter:
         infer_input_tensor = pb.ModelInferRequest.InferInputTensor(
             name=type_object.name,
             shape=type_object.shape,
-            datatype=type_object.datatype,
+            datatype=str(type_object.datatype),
             contents=InferTensorContentsConverter.from_types(
-                type_object.data, datatype=type_object.datatype
+                type_object.data, datatype=Datatype(type_object.datatype)
             ),
         )
 
@@ -295,7 +296,7 @@ class ParametersConverter:
         cls, type_object: types.Parameters
     ) -> Mapping[str, pb.InferParameter]:
         pb_object = {}
-        as_dict = type_object.dict()
+        as_dict = type_object.model_dump(by_alias=True)
 
         for key, value in as_dict.items():
             infer_parameter_key = cls._get_inferparameter_key(value)
@@ -325,17 +326,17 @@ class InferTensorContentsConverter:
     def to_types(cls, pb_object: pb.InferTensorContents) -> types.TensorData:
         data = _get_value(pb_object, default=[])
         as_list = list(data)
-        return types.TensorData.construct(__root__=as_list)
+        return types.TensorData(root=as_list)
 
     @classmethod
     def from_types(
-        cls, type_object: types.TensorData, datatype: str
+        cls, type_object: types.TensorData, datatype: Datatype
     ) -> pb.InferTensorContents:
         contents = cls._get_contents(type_object, datatype)
         return pb.InferTensorContents(**contents)
 
     @classmethod
-    def _get_contents(cls, type_object: types.TensorData, datatype: str) -> dict:
+    def _get_contents(cls, type_object: types.TensorData, datatype: Datatype) -> dict:
         field = _FIELDS[datatype]
         return {field: type_object}
 
@@ -421,9 +422,9 @@ class InferOutputTensorConverter:
         infer_output_tensor = pb.ModelInferResponse.InferOutputTensor(
             name=type_object.name,
             shape=type_object.shape,
-            datatype=type_object.datatype,
+            datatype=str(type_object.datatype),
             contents=InferTensorContentsConverter.from_types(
-                type_object.data, datatype=type_object.datatype
+                type_object.data, datatype=Datatype(type_object.datatype)
             ),
         )
 
@@ -498,14 +499,14 @@ class RepositoryIndexResponseItemConverter:
     ]:
         model_index = pb.RepositoryIndexResponse.ModelIndex(
             name=type_object.name,
-            state=type_object.state.value,
+            state=str(type_object.state),
             reason=type_object.reason,
         )
 
         if use_model_repository:
             model_index = mr_pb.RepositoryIndexResponse.ModelIndex(  # type: ignore
                 name=type_object.name,
-                state=type_object.state.value,
+                state=str(type_object.state),
                 reason=type_object.reason,
             )
 

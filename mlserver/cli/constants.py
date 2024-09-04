@@ -1,12 +1,16 @@
+DefaultBaseImage = "seldonio/mlserver:{version}-slim"
+
 DockerfileName = "Dockerfile"
 DockerfileTemplate = """
-FROM continuumio/miniconda3:4.12.0 AS env-builder
+FROM continuumio/miniconda3:24.4.0-0 AS env-builder
 SHELL ["/bin/bash", "-c"]
 
 ARG MLSERVER_ENV_NAME="mlserver-custom-env" \\
     MLSERVER_ENV_TARBALL="./envs/base.tar.gz"
 
 RUN conda config --add channels conda-forge && \\
+    conda install conda-libmamba-solver==23.7.0 && \\
+    conda config --set solver libmamba && \\
     conda install conda-pack
 
 # The `[]` character range will ensure that Docker doesn't complain if the
@@ -31,7 +35,7 @@ RUN mkdir $(dirname $MLSERVER_ENV_TARBALL); \\
     done; \\
     chmod -R 776 $(dirname $MLSERVER_ENV_TARBALL)
 
-FROM seldonio/mlserver:{version}-slim
+FROM {base_image}
 SHELL ["/bin/bash", "-c"]
 
 # Copy all potential sources for custom environments
@@ -52,7 +56,8 @@ USER root
 RUN ./hack/build-env.sh . && \\
     mkdir -p ./envs/base && \\
     chown -R 1000:0 ./envs/base && \\
-    chmod -R 776 ./envs/base
+    chmod -R 776 ./envs/base && \\
+    rm -rf /root/.cache/pip
 USER 1000
 
 # Copy everything else
@@ -76,6 +81,10 @@ Dockerignore = """
 *.pyo
 *.pyd
 bin
+
+# MLServer folders
+.metrics
+.envs
 
 # Mac file system
 **/.DS_Store

@@ -6,12 +6,13 @@ from mlserver.parallel.messages import (
     ModelUpdateMessage,
     ModelUpdateType,
 )
-from mlserver.utils import get_import_path
 
 from ..fixtures import SumModel
 
 # Used to fill in all the default values
-_dummy_model_settings = ModelSettings(name="foo", implementation=SumModel).dict()
+_dummy_model_settings = ModelSettings(name="foo", implementation=SumModel).model_dump(
+    by_alias=True
+)
 
 
 @pytest.mark.parametrize(
@@ -19,10 +20,12 @@ _dummy_model_settings = ModelSettings(name="foo", implementation=SumModel).dict(
     [
         (
             {
+                "id": "foo",
                 "update_type": ModelUpdateType.Load,
                 "model_settings": ModelSettings(name="foo", implementation=SumModel),
             },
             ModelUpdateMessage(
+                id="foo",
                 update_type=ModelUpdateType.Load,
                 serialised_model_settings=json.dumps(
                     {
@@ -37,12 +40,14 @@ _dummy_model_settings = ModelSettings(name="foo", implementation=SumModel).dict(
         ),
         (
             {
+                "id": "foo",
                 "update_type": ModelUpdateType.Load,
                 "serialised_model_settings": (
                     '{"name":"foo","implementation":"tests.fixtures.SumModel"}'
                 ),
             },
             ModelUpdateMessage(
+                id="foo",
                 update_type=ModelUpdateType.Load,
                 serialised_model_settings=(
                     '{"name":"foo","implementation":"tests.fixtures.SumModel"}'
@@ -81,8 +86,8 @@ def test_model_settings(
     model_update_message: ModelUpdateMessage, expected: ModelSettings
 ):
     model_settings = model_update_message.model_settings
-    import_path = get_import_path(model_settings.implementation)
-    expected_path = get_import_path(expected.implementation)
+    import_path = model_settings.implementation_
+    expected_path = expected.implementation_
     assert import_path == expected_path
 
     assert model_settings.name == expected.name

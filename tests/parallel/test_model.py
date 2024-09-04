@@ -1,11 +1,22 @@
 import pytest
 
+from mlserver.errors import MLServerError
 from mlserver.handlers.custom import get_custom_handlers
 from mlserver.types import InferenceRequest, MetadataModelResponse
 from mlserver.model import MLModel
 from mlserver.settings import ModelSettings
+from mlserver.parallel.pool import InferencePool
 
 from ..fixtures import ErrorModel
+
+
+@pytest.fixture
+async def sum_model(inference_pool: InferencePool, sum_model: MLModel) -> MLModel:
+    parallel_model = await inference_pool.load_model(sum_model)
+
+    yield parallel_model
+
+    await inference_pool.unload_model(sum_model)
 
 
 async def test_predict(
@@ -24,10 +35,11 @@ async def test_predict_error(
     error_model: MLModel,
     inference_request: InferenceRequest,
 ):
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(MLServerError) as excinfo:
         await error_model.predict(inference_request)
 
-    assert str(excinfo.value) == ErrorModel.error_message
+    expected_msg = f"mlserver.errors.MLServerError: {ErrorModel.error_message}"
+    assert str(excinfo.value) == expected_msg
 
 
 async def test_metadata(

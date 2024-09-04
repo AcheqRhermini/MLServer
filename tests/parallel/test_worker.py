@@ -1,6 +1,8 @@
 from multiprocessing import Queue
 
 from mlserver.settings import ModelSettings
+from mlserver.codecs import StringCodec
+from mlserver.parallel.errors import WorkerError
 from mlserver.parallel.worker import Worker
 from mlserver.parallel.messages import ModelUpdateMessage, ModelRequestMessage
 
@@ -57,6 +59,7 @@ async def test_custom_handler(
 async def test_load_model(
     worker: Worker,
     load_message: ModelUpdateMessage,
+    responses: Queue,
 ):
     loaded_models = await worker._model_registry.get_models()
     assert len(list(loaded_models)) == 1
@@ -66,7 +69,8 @@ async def test_load_model(
     new_load_message = ModelUpdateMessage(
         update_type=load_message.update_type, model_settings=new_model_settings
     )
-    await worker.send_update(new_load_message)
+    worker.send_update(new_load_message)
+    responses.get()
 
     loaded_models = list(await worker._model_registry.get_models())
     assert len(loaded_models) == 2
@@ -77,11 +81,13 @@ async def test_load_model(
 async def test_unload_model(
     worker: Worker,
     unload_message: ModelUpdateMessage,
+    responses: Queue,
 ):
     loaded_models = await worker._model_registry.get_models()
     assert len(list(loaded_models)) == 1
 
-    await worker.send_update(unload_message)
+    worker.send_update(unload_message)
+    responses.get()
 
     loaded_models = list(await worker._model_registry.get_models())
     assert len(loaded_models) == 0
@@ -108,4 +114,27 @@ async def test_exception(
     assert response.id == inference_request_message.id
     assert response.return_value is None
     assert response.exception is not None
-    assert str(response.exception) == error_msg
+    assert response.exception.__class__ == WorkerError
+    assert str(response.exception) == f"builtins.Exception: {error_msg}"
+
+
+async def test_worker_env(
+    worker_with_env: Worker,
+    responses: Queue,
+    env_model_settings: ModelSettings,
+    inference_request_message: ModelRequestMessage,
+):
+    inference_request_message.model_name = env_model_settings.name
+    inference_request_message.model_version = env_model_settings.version
+
+    worker_with_env.send_request(inference_request_message)
+    response_message = responses.get()
+
+    response = response_message.return_value
+    assert len(response.outputs) == 1
+
+    # Note: These versions come from the `environment.yml` found in
+    # `./tests/testdata/environment.yaml`
+    assert response.outputs[0].name == "sklearn_version"
+    [sklearn_version] = StringCodec.decode_output(response.outputs[0])
+    assert sklearn_version == "1.0.2"

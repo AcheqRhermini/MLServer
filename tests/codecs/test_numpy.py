@@ -4,7 +4,7 @@ import numpy as np
 from typing import Any
 
 from mlserver.codecs.numpy import NumpyCodec, to_datatype
-from mlserver.types import RequestInput, ResponseOutput
+from mlserver.types import RequestInput, ResponseOutput, Parameters, Datatype
 
 
 @pytest.mark.parametrize(
@@ -20,34 +20,82 @@ def test_can_encode(payload: Any, expected: bool):
     [
         (
             np.array([1, 2, 3]),
-            ResponseOutput(name="foo", shape=[3], data=[1, 2, 3], datatype="INT64"),
+            ResponseOutput(
+                name="foo",
+                shape=[3, 1],
+                data=[1, 2, 3],
+                datatype="INT64",
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
+            ),
         ),
         (
             np.array([[1, 2], [3, 4]]),
             ResponseOutput(
-                name="foo", shape=[2, 2], data=[1, 2, 3, 4], datatype="INT64"
+                name="foo",
+                shape=[2, 2],
+                data=[1, 2, 3, 4],
+                datatype="INT64",
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
             ),
         ),
         (
             np.array([[1, 2], [3, 4]], dtype=np.int32),
             ResponseOutput(
-                name="foo", shape=[2, 2], data=[1, 2, 3, 4], datatype="INT32"
+                name="foo",
+                shape=[2, 2],
+                data=[1, 2, 3, 4],
+                datatype="INT32",
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
             ),
         ),
         (
             np.array([1.0, 2.0]),
-            ResponseOutput(name="foo", shape=[2], data=[1, 2], datatype="FP64"),
+            ResponseOutput(
+                name="foo",
+                shape=[2, 1],
+                data=[1, 2],
+                datatype="FP64",
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
+            ),
         ),
         (
             np.array([[b"\x01"], [b"\x02"]], dtype=bytes),
             ResponseOutput(
-                name="foo", shape=[2, 1], data=[b"\x01\x02"], datatype="BYTES"
+                name="foo",
+                shape=[2, 1],
+                data=[b"\x01\x02"],
+                datatype="BYTES",
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
             ),
         ),
         (
             np.array(["foo", "bar"], dtype=str),
             ResponseOutput(
-                name="foo", shape=[2], data=[b"foo", b"bar"], datatype="BYTES"
+                name="foo",
+                shape=[2, 1],
+                data=[b"foo", b"bar"],
+                datatype="BYTES",
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
+            ),
+        ),
+        (
+            np.array([None, "bar"]),
+            ResponseOutput(
+                name="foo",
+                shape=[2, 1],
+                data=[None, "bar"],
+                datatype="BYTES",
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
+            ),
+        ),
+        (
+            np.array([2.3, 3.4, np.NaN]),
+            ResponseOutput(
+                name="foo",
+                shape=[3, 1],
+                data=[2.3, 3.4, None],
+                datatype="FP64",
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
             ),
         ),
     ],
@@ -82,6 +130,10 @@ def test_encode_output(payload: np.ndarray, expected: ResponseOutput):
             RequestInput(name="foo", shape=[2], data=["foo", "bar"], datatype="BYTES"),
             np.array(["foo", "bar"], dtype=str),
         ),
+        (
+            RequestInput(name="foo", shape=[3], data=[1, 2, None], datatype="FP16"),
+            np.array([1, 2, np.NaN], dtype="float16"),
+        ),
     ],
 )
 def test_decode_input(request_input: RequestInput, expected: np.ndarray):
@@ -99,7 +151,7 @@ def test_decode_input(request_input: RequestInput, expected: np.ndarray):
         RequestInput(name="foo", shape=[2], data=["foo", "bar"], datatype="BYTES"),
     ],
 )
-def test_encode_input(request_input):
+def test_codec_idempotent(request_input: RequestInput):
     decoded = NumpyCodec.decode_input(request_input)
     response_output = NumpyCodec.encode_output(name="foo", payload=decoded)
 
@@ -111,38 +163,43 @@ def test_encode_input(request_input):
 
 
 @pytest.mark.parametrize(
-    "payload",
+    "payload, expected",
     [
-        np.array([1, 2, 3]),
-        np.array([[1, 2], [3, 4]]),
-        np.array([1.0, 2.0]),
-        np.array([[b"\x01"], [b"\x02"]], dtype=bytes),
+        (np.array([1, 2, 3]), np.array([[1], [2], [3]])),
+        (np.array([[1, 2], [3, 4]]), np.array([[1, 2], [3, 4]])),
+        (np.array([1.0, 2.0]), np.array([[1.0], [2.0]])),
+        (
+            np.array([[b"\x01"], [b"\x02"]], dtype=bytes),
+            np.array([[b"\x01"], [b"\x02"]], dtype=bytes),
+        ),
     ],
 )
-def test_decode_output(payload):
+def test_decode_output(payload, expected):
+    # Note that `decode(encode(x)) != x`, because of shape changes to make
+    # the `[N] == [N, 1]` explicit
     response_output = NumpyCodec.encode_output(name="foo", payload=payload)
     output_response_decoded = NumpyCodec.decode_output(response_output)
-    np.testing.assert_array_equal(output_response_decoded, payload)
+    np.testing.assert_array_equal(output_response_decoded, expected)
 
 
 @pytest.mark.parametrize(
     "dtype, datatype",
     [
-        (np.bool_, "BOOL"),
-        (np.uint8, "UINT8"),
-        (np.uint16, "UINT16"),
-        (np.uint32, "UINT32"),
-        (np.uint64, "UINT64"),
-        (np.int8, "INT8"),
-        (np.int16, "INT16"),
-        (np.int32, "INT32"),
-        (np.int64, "INT64"),
-        (np.float16, "FP16"),
-        (np.float32, "FP32"),
-        (np.float64, "FP64"),
-        (np.byte, "INT8"),
-        (bytes, "BYTES"),
-        (str, "BYTES"),
+        (np.bool_, Datatype.BOOL),
+        (np.uint8, Datatype.UINT8),
+        (np.uint16, Datatype.UINT16),
+        (np.uint32, Datatype.UINT32),
+        (np.uint64, Datatype.UINT64),
+        (np.int8, Datatype.INT8),
+        (np.int16, Datatype.INT16),
+        (np.int32, Datatype.INT32),
+        (np.int64, Datatype.INT64),
+        (np.float16, Datatype.FP16),
+        (np.float32, Datatype.FP32),
+        (np.float64, Datatype.FP64),
+        (np.byte, Datatype.INT8),
+        (bytes, Datatype.BYTES),
+        (str, Datatype.BYTES),
     ],
 )
 def test_to_datatype(dtype, datatype):

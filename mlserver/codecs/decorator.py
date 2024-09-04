@@ -9,21 +9,11 @@ from typing import (
     Union,
     Type,
     Tuple,
+    get_origin,
+    get_args,
     get_type_hints,
     TYPE_CHECKING,
 )
-
-try:
-    from typing import get_origin, get_args
-except ImportError:
-    # The `get_origin` and `get_args` don't exist in Python 3.7, so we'll
-    # backfill them manually.
-    # When we remove support for Python 3.7, remove these methods.
-    def get_origin(t: Type) -> Type:  # type: ignore
-        return getattr(t, "__origin__", type(None))
-
-    def get_args(t: Type) -> tuple:  # type: ignore
-        return getattr(t, "__args__", ())
 
 
 from ..types import InferenceRequest, InferenceResponse, ResponseOutput
@@ -47,6 +37,10 @@ def _as_list(a: Optional[Union[Any, Tuple[Any]]]) -> List[Any]:
     if isinstance(a, tuple):
         # Split into components
         return list(a)
+
+    if get_origin(a) is tuple:
+        # Convert type arguments into list
+        return list(get_args(a))
 
     # Otherwise, assume it's a single element
     return [a]
@@ -182,7 +176,7 @@ class SignatureCodec(RequestCodec):
         return None
 
     def encode_response(  # type: ignore
-        self, model_name: str, payload: Any, model_version: str = None
+        self, model_name: str, payload: Any, model_version: Optional[str] = None
     ) -> InferenceResponse:
         payloads = _as_list(payload)
         outputs = []

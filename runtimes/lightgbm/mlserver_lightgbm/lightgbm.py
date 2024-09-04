@@ -21,8 +21,7 @@ class LightGBMModel(MLModel):
 
         self._model = lgb.Booster(model_file=model_uri)
 
-        self.ready = True
-        return self.ready
+        return True
 
     async def predict(self, payload: types.InferenceRequest) -> types.InferenceResponse:
         decoded = self.decode_request(payload, default_codec=NumpyRequestCodec)
@@ -31,5 +30,9 @@ class LightGBMModel(MLModel):
         return types.InferenceResponse(
             model_name=self.name,
             model_version=self.version,
-            outputs=[NumpyCodec.encode_output(name="predict", payload=prediction)],
+            outputs=[
+                NumpyCodec.encode_output(
+                    name="predict", payload=prediction  # type: ignore
+                )
+            ],
         )

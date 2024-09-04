@@ -5,11 +5,11 @@ from asyncio import CancelledError
 from typing import List, Union
 
 from mlserver.model import MLModel
-from mlserver.errors import ModelNotFound
+from mlserver.errors import MLServerError, ModelNotFound
 from mlserver.registry import MultiModelRegistry, SingleModelRegistry
-from mlserver.settings import ModelSettings
+from mlserver.settings import ModelSettings, ModelParameters
 
-from .fixtures import SlowModel
+from .fixtures import ErrorModel, SlowModel
 
 
 @pytest.fixture
@@ -67,6 +67,7 @@ async def test_get_model_not_found(model_registry, name, version):
 )
 async def test_get_model(model_registry, sum_model, name, version):
     found_model = await model_registry.get_model(name, version)
+    assert found_model.ready
     assert found_model == sum_model
 
 
@@ -76,6 +77,8 @@ async def test_model_hooks(
     sum_model_settings.name = "sum-model-2"
 
     sum_model = await model_registry.load(sum_model_settings)
+    assert sum_model.ready
+
     for callback in model_registry._on_model_load:
         callback.assert_called_once_with(sum_model)
 
@@ -93,6 +96,8 @@ async def test_reload_model(
     reloaded_model = await model_registry.get_model(sum_model_settings.name)
     assert new_model != existing_model
     assert new_model == reloaded_model
+    assert reloaded_model.ready
+    assert not existing_model.ready
 
     for callback in model_registry._on_model_load:
         callback.assert_not_called()
@@ -114,6 +119,7 @@ async def test_load_multi_version(
     new_model_settings = sum_model_settings.copy(deep=True)
     new_model_settings.parameters.version = "v2.0.0"
     new_model = await model_registry.load(new_model_settings)
+    assert new_model.ready
 
     # Ensure latest model is now the default one
     default_model = await model_registry.get_model(sum_model_settings.name)
@@ -131,6 +137,14 @@ async def test_load_multi_version(
 
     for callback in model_registry._on_model_unload:
         callback.assert_not_called_with(existing_model)
+
+
+async def test_unload(model_registry: MultiModelRegistry, sum_model: MLModel, mocker):
+    spy = mocker.spy(sum_model, "unload")
+    await model_registry.unload(sum_model.name)
+
+    assert not sum_model.ready
+    spy.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -229,6 +243,23 @@ async def test_model_not_ready(model_registry: MultiModelRegistry):
         await load_task
     except CancelledError:
         pass
+
+
+async def test_model_load_error(model_registry: MultiModelRegistry):
+    error_model_settings = ModelSettings(
+        name="error-model",
+        implementation=ErrorModel,
+        parameters=ModelParameters(load_error=True),
+    )
+
+    with pytest.raises(MLServerError):
+        await model_registry.load(error_model_settings)
+
+    with pytest.raises(ModelNotFound):
+        await model_registry.get_model(error_model_settings.name)
+
+    models = list(await model_registry.get_models())
+    assert len(models) == 1
 
 
 async def test_rolling_reload(

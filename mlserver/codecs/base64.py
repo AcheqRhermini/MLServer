@@ -4,7 +4,7 @@ import binascii
 from typing import Any, List, Union
 from functools import partial
 
-from ..types import RequestInput, ResponseOutput
+from ..types import RequestInput, ResponseOutput, Parameters
 from .lists import is_list_of
 from .base import InputCodec, register_input_codec
 from .lists import as_list, ListElement
@@ -58,17 +58,19 @@ class Base64Codec(InputCodec):
     ) -> ResponseOutput:
         # Assume that payload is already in b64, so we only need to pack it
         packed = map(partial(_encode_base64, use_bytes=use_bytes), payload)
-        shape = [len(payload)]
+        shape = [len(payload), 1]
         return ResponseOutput(
             name=name,
             datatype="BYTES",
             shape=shape,
             data=list(packed),
+            parameters=Parameters(content_type=cls.ContentType),
         )
 
     @classmethod
     def decode_output(cls, response_output: ResponseOutput) -> List[bytes]:
-        packed = response_output.data.__root__
+        packed = response_output.data.root
+
         return list(map(_decode_base64, as_list(packed)))
 
     @classmethod
@@ -82,10 +84,11 @@ class Base64Codec(InputCodec):
             datatype=output.datatype,
             shape=output.shape,
             data=output.data,
+            parameters=Parameters(content_type=cls.ContentType),
         )
 
     @classmethod
     def decode_input(cls, request_input: RequestInput) -> List[bytes]:
-        packed = request_input.data.__root__
+        packed = request_input.data.root
 
         return list(map(_decode_base64, as_list(packed)))

@@ -23,7 +23,7 @@ from mlserver.codecs.utils import (
     DecodedParameterName,
 )
 from mlserver.codecs.pandas import PandasCodec
-from mlserver.codecs.numpy import NumpyRequestCodec
+from mlserver.codecs.numpy import NumpyCodec, NumpyRequestCodec
 from mlserver.codecs.string import StringCodec
 
 
@@ -33,7 +33,13 @@ from mlserver.codecs.string import StringCodec
         (
             np.array([1, 2, 3, 4]),
             RequestOutput(name="foo"),
-            ResponseOutput(name="foo", datatype="INT64", shape=[4], data=[1, 2, 3, 4]),
+            ResponseOutput(
+                name="foo",
+                datatype="INT64",
+                shape=[4, 1],
+                data=[1, 2, 3, 4],
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
+            ),
         ),
         (
             ["asd"],
@@ -41,7 +47,7 @@ from mlserver.codecs.string import StringCodec
             ResponseOutput(
                 name="bar",
                 datatype="BYTES",
-                shape=[1],
+                shape=[1, 1],
                 data=[b"asd"],
                 parameters=Parameters(content_type=StringCodec.ContentType),
             ),
@@ -50,7 +56,11 @@ from mlserver.codecs.string import StringCodec
             ["2021-02-25T12:00:00Z"],
             RequestOutput(name="bar", parameters=Parameters(content_type="datetime")),
             ResponseOutput(
-                name="bar", datatype="BYTES", shape=[1], data=[b"2021-02-25T12:00:00Z"]
+                name="bar",
+                datatype="BYTES",
+                shape=[1, 1],
+                data=[b"2021-02-25T12:00:00Z"],
+                parameters=Parameters(content_type="datetime"),
             ),
         ),
         ({1, 2, 3, 4}, RequestOutput(name="bar"), None),
@@ -79,15 +89,20 @@ def test_encode_response_output(
             InferenceResponse(
                 model_name="sum-model",
                 model_version="v1.2.3",
+                parameters=Parameters(content_type=PandasCodec.ContentType),
                 outputs=[
                     ResponseOutput(
-                        name="a", datatype="INT64", shape=[3], data=[1, 2, 3]
+                        name="a",
+                        datatype="INT64",
+                        shape=[3, 1],
+                        data=[1, 2, 3],
                     ),
                     ResponseOutput(
                         name="b",
                         datatype="BYTES",
-                        shape=[3],
+                        shape=[3, 1],
                         data=[b"a", b"b", b"c"],
+                        parameters=Parameters(content_type=StringCodec.ContentType),
                     ),
                 ],
             ),
@@ -97,9 +112,14 @@ def test_encode_response_output(
             InferenceResponse(
                 model_name="sum-model",
                 model_version="v1.2.3",
+                parameters=Parameters(content_type=NumpyCodec.ContentType),
                 outputs=[
                     ResponseOutput(
-                        name="output-1", datatype="INT64", shape=[3], data=[1, 2, 3]
+                        name="output-1",
+                        datatype="INT64",
+                        shape=[3, 1],
+                        data=[1, 2, 3],
+                        parameters=Parameters(content_type=NumpyCodec.ContentType),
                     ),
                 ],
             ),
@@ -109,11 +129,12 @@ def test_encode_response_output(
             InferenceResponse(
                 model_name="sum-model",
                 model_version="v1.2.3",
+                parameters=Parameters(content_type=StringCodec.ContentType),
                 outputs=[
                     ResponseOutput(
                         name="output-1",
                         datatype="BYTES",
-                        shape=[2],
+                        shape=[2, 1],
                         data=[b"foo", b"bar"],
                         parameters=Parameters(content_type=StringCodec.ContentType),
                     ),
@@ -138,7 +159,13 @@ def test_encode_inference_response(
             InferenceRequest(
                 parameters=Parameters(content_type=PandasCodec.ContentType),
                 inputs=[
-                    RequestInput(name="a", datatype="INT64", shape=[3], data=[1, 2, 3]),
+                    RequestInput(
+                        name="a",
+                        datatype="INT64",
+                        shape=[3],
+                        data=[1, 2, 3],
+                        parameters=Parameters(content_type=NumpyCodec.ContentType),
+                    ),
                     RequestInput(
                         name="b",
                         datatype="BYTES",

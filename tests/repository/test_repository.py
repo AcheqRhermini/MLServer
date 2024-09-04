@@ -1,10 +1,12 @@
 import os
-import json
 import pytest
 
-from mlserver.repository import ModelRepository, DEFAULT_MODEL_SETTINGS_FILENAME
+from mlserver.repository import (
+    ModelRepository,
+    SchemalessModelRepository,
+    DEFAULT_MODEL_SETTINGS_FILENAME,
+)
 from mlserver.settings import ModelSettings, ENV_PREFIX_MODEL_SETTINGS
-from mlserver.utils import get_import_path
 
 
 @pytest.fixture
@@ -28,11 +30,8 @@ def multi_model_folder(model_folder: str, sum_model_settings: ModelSettings) -> 
             model_version_folder, DEFAULT_MODEL_SETTINGS_FILENAME
         )
         with open(model_settings_path, "w") as f:
-            settings_dict = sum_model_settings.dict()
-            settings_dict["implementation"] = get_import_path(
-                sum_model_settings.implementation
-            )
-            f.write(json.dumps(settings_dict))
+            settings_json = sum_model_settings.model_dump_json(by_alias=True)
+            f.write(settings_json)
 
     return model_folder
 
@@ -59,7 +58,7 @@ async def test_list(
 
 
 async def test_list_multi_model(multi_model_folder: str):
-    multi_model_repository = ModelRepository(multi_model_folder)
+    multi_model_repository = SchemalessModelRepository(multi_model_folder)
 
     settings_list = await multi_model_repository.list()
     settings_list.sort(key=lambda ms: ms.parameters.version)  # type: ignore
@@ -90,7 +89,7 @@ async def test_list_fallback(
     )
     monkeypatch.setenv(
         f"{ENV_PREFIX_MODEL_SETTINGS}IMPLEMENTATION",
-        get_import_path(sum_model_settings.implementation),  # type: ignore
+        sum_model_settings.implementation_,  # type: ignore
     )
 
     model_settings_path = os.path.join(model_folder, DEFAULT_MODEL_SETTINGS_FILENAME)

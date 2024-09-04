@@ -29,7 +29,7 @@ def decode_str(encoded: ListElement, str_codec=_DefaultStrCodec) -> str:
 
 
 def _decode_input_or_output(input_or_output: InputOrOutput) -> List[str]:
-    packed = input_or_output.data.__root__
+    packed = input_or_output.data.root
     unpacked = map(decode_str, as_list(packed))
     return list(unpacked)
 
@@ -37,7 +37,7 @@ def _decode_input_or_output(input_or_output: InputOrOutput) -> List[str]:
 @register_input_codec
 class StringCodec(InputCodec):
     """
-    Encodes a Python string as a BYTES input.
+    Encodes a list of Python strings as a BYTES input (output).
     """
 
     ContentType = "str"
@@ -55,7 +55,7 @@ class StringCodec(InputCodec):
         if use_bytes:
             packed = list(map(encode_str, payload))  # type: ignore
 
-        shape = [len(payload)]
+        shape = [len(payload), 1]
         return ResponseOutput(
             name=name,
             datatype="BYTES",
@@ -89,6 +89,13 @@ class StringCodec(InputCodec):
 
 @register_request_codec
 class StringRequestCodec(SingleInputRequestCodec):
+    """
+    Decodes the first input (output) of request (response) as a list of
+    strings.
+    This codec can be useful for cases where the whole payload is a single
+    list of strings.
+    """
+
     InputCodec = StringCodec
     ContentType = StringCodec.ContentType
     TypeHint = List[str]

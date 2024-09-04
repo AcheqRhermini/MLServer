@@ -35,20 +35,30 @@ from mlserver.grpc.converters import (
             PandasCodec,
             pb.ModelInferResponse(
                 model_name="my-model",
+                parameters={
+                    "content_type": pb.InferParameter(
+                        string_param=PandasCodec.ContentType
+                    )
+                },
                 outputs=[
                     pb.ModelInferResponse.InferOutputTensor(
                         name="a",
                         datatype="INT64",
-                        shape=[3],
+                        shape=[3, 1],
                         contents=pb.InferTensorContents(int64_contents=[1, 2, 3]),
                     ),
                     pb.ModelInferResponse.InferOutputTensor(
                         name="b",
                         datatype="BYTES",
-                        shape=[3],
+                        shape=[3, 1],
                         contents=pb.InferTensorContents(
                             bytes_contents=[b"A", b"B", b"C"]
                         ),
+                        parameters={
+                            "content_type": pb.InferParameter(
+                                string_param=StringCodec.ContentType
+                            )
+                        },
                     ),
                 ],
             ),
@@ -113,8 +123,13 @@ def test_decode_infer_request(encoded: pb.ModelInferRequest, expected: Any):
             pb.ModelInferResponse.InferOutputTensor(
                 name="output-0",
                 datatype="FP64",
-                shape=[1],
+                shape=[1, 1],
                 contents=pb.InferTensorContents(fp64_contents=[21.0]),
+                parameters={
+                    "content_type": pb.InferParameter(
+                        string_param=NumpyCodec.ContentType
+                    )
+                },
             ),
         ),
         (
@@ -125,6 +140,11 @@ def test_decode_infer_request(encoded: pb.ModelInferRequest, expected: Any):
                 datatype="BYTES",
                 shape=[2, 1],
                 contents=pb.InferTensorContents(bytes_contents=[b"\x01\x02"]),
+                parameters={
+                    "content_type": pb.InferParameter(
+                        string_param=NumpyCodec.ContentType
+                    )
+                },
             ),
         ),
         (
@@ -133,7 +153,7 @@ def test_decode_infer_request(encoded: pb.ModelInferRequest, expected: Any):
             pb.ModelInferResponse.InferOutputTensor(
                 name="output-0",
                 datatype="BYTES",
-                shape=[3],
+                shape=[3, 1],
                 parameters={
                     "content_type": pb.InferParameter(
                         string_param=StringCodec.ContentType
@@ -150,10 +170,15 @@ def test_decode_infer_request(encoded: pb.ModelInferRequest, expected: Any):
             pb.ModelInferResponse.InferOutputTensor(
                 name="output-0",
                 datatype="BYTES",
-                shape=[1],
+                shape=[1, 1],
                 contents=pb.InferTensorContents(
                     bytes_contents=[b"UHl0aG9uIGlzIGZ1bg=="]
                 ),
+                parameters={
+                    "content_type": pb.InferParameter(
+                        string_param=Base64Codec.ContentType
+                    )
+                },
             ),
         ),
     ],

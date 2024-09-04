@@ -1,4 +1,5 @@
 import uvicorn
+import signal
 
 from ..settings import Settings
 from ..handlers import DataPlane, ModelRepositoryHandlers, get_custom_handlers
@@ -6,7 +7,8 @@ from ..model import MLModel
 
 from .utils import matches
 from .app import create_app
-from .logging import logger
+from .logging import logger, disable_health_access_logs
+from typing import Optional
 
 
 class _NoSignalServer(uvicorn.Server):
@@ -59,6 +61,14 @@ class RESTServer:
     async def start(self):
         cfg = self._get_config()
         self._server = _NoSignalServer(cfg)
+        if not self._settings.debug:
+            disable_health_access_logs()
+
+        logger.info(
+            "HTTP server running on "
+            f"http://{self._settings.host}:{self._settings.http_port}"
+        )
+
         await self._server.serve()
 
     def _get_config(self):
@@ -86,5 +96,10 @@ class RESTServer:
 
         return uvicorn.Config(self._app, **kwargs)
 
-    async def stop(self, sig: int = None):
+    async def stop(self, sig: Optional[int] = None):
+        if sig is None:
+            # `sig` is no longer optional for `handle_exit` in
+            # latest `uvicorn`
+            sig = signal.SIGINT
+
         self._server.handle_exit(sig=sig, frame=None)

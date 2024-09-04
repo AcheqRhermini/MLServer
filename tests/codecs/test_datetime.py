@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from mlserver.codecs import DatetimeCodec
-from mlserver.types import RequestInput, ResponseOutput
+from mlserver.types import RequestInput, ResponseOutput, Parameters
 
 TestDatetimeIso = "2021-08-24T15:01:19"
 TestDatetimeIsoB = b"2021-08-24T15:01:19"
@@ -36,9 +36,10 @@ def test_can_encode(payload: Any, expected: bool):
             True,
             ResponseOutput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIsoB],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
         (
@@ -47,9 +48,10 @@ def test_can_encode(payload: Any, expected: bool):
             True,
             ResponseOutput(
                 name="foo",
-                shape=[2],
+                shape=[2, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIsoB, TestDatetimeIsoB],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
         (
@@ -58,9 +60,10 @@ def test_can_encode(payload: Any, expected: bool):
             True,
             ResponseOutput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIsoB],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
         (
@@ -69,9 +72,10 @@ def test_can_encode(payload: Any, expected: bool):
             True,
             ResponseOutput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestTzDatetimeIsoB],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
         (
@@ -80,9 +84,10 @@ def test_can_encode(payload: Any, expected: bool):
             False,
             ResponseOutput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestTzDatetimeIso],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
     ],
@@ -102,7 +107,7 @@ def test_encode_output(decoded, use_bytes, expected):
             # Single binary ISO-encoded datetime
             ResponseOutput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=TestDatetimeIsoB,
             ),
@@ -112,7 +117,7 @@ def test_encode_output(decoded, use_bytes, expected):
             # Single (non-binary) ISO-encoded datetime
             ResponseOutput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIso],
             ),
@@ -122,7 +127,7 @@ def test_encode_output(decoded, use_bytes, expected):
             # Multiple binary ISO-encoded datetime
             ResponseOutput(
                 name="foo",
-                shape=[2],
+                shape=[2, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIsoB, TestDatetimeIsoB],
             ),
@@ -132,7 +137,7 @@ def test_encode_output(decoded, use_bytes, expected):
             # Multiple (non-binary) ISO-encoded datetime
             ResponseOutput(
                 name="foo",
-                shape=[2],
+                shape=[2, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIso, TestDatetimeIso],
             ),
@@ -142,7 +147,7 @@ def test_encode_output(decoded, use_bytes, expected):
             # Single (non-binary) ISO-encoded datetime with timezone
             ResponseOutput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestTzDatetimeIso],
             ),
@@ -165,9 +170,10 @@ def test_decode_output(encoded, expected):
             True,
             RequestInput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIsoB],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
         (
@@ -176,9 +182,10 @@ def test_decode_output(encoded, expected):
             True,
             RequestInput(
                 name="foo",
-                shape=[2],
+                shape=[2, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIsoB, TestDatetimeIsoB],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
         (
@@ -187,9 +194,10 @@ def test_decode_output(encoded, expected):
             True,
             RequestInput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIsoB],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
         (
@@ -198,9 +206,10 @@ def test_decode_output(encoded, expected):
             True,
             RequestInput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestTzDatetimeIsoB],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
         (
@@ -209,9 +218,10 @@ def test_decode_output(encoded, expected):
             False,
             RequestInput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestTzDatetimeIso],
+                parameters=Parameters(content_type=DatetimeCodec.ContentType),
             ),
         ),
     ],
@@ -231,7 +241,7 @@ def test_encode_input(decoded, use_bytes, expected):
             # Single binary ISO-encoded datetime
             RequestInput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=TestDatetimeIsoB,
             ),
@@ -241,7 +251,7 @@ def test_encode_input(decoded, use_bytes, expected):
             # Single (non-binary) ISO-encoded datetime
             RequestInput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIso],
             ),
@@ -251,7 +261,7 @@ def test_encode_input(decoded, use_bytes, expected):
             # Multiple binary ISO-encoded datetime
             RequestInput(
                 name="foo",
-                shape=[2],
+                shape=[2, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIsoB, TestDatetimeIsoB],
             ),
@@ -261,7 +271,7 @@ def test_encode_input(decoded, use_bytes, expected):
             # Multiple (non-binary) ISO-encoded datetime
             RequestInput(
                 name="foo",
-                shape=[2],
+                shape=[2, 1],
                 datatype="BYTES",
                 data=[TestDatetimeIso, TestDatetimeIso],
             ),
@@ -271,7 +281,7 @@ def test_encode_input(decoded, use_bytes, expected):
             # Single (non-binary) ISO-encoded datetime with timezone
             RequestInput(
                 name="foo",
-                shape=[1],
+                shape=[1, 1],
                 datatype="BYTES",
                 data=[TestTzDatetimeIso],
             ),

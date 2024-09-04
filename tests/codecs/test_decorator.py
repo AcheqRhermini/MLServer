@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from typing import Any, Callable, Dict, Optional, List
+from typing import Any, Callable, Dict, Optional, List, Tuple
 
 from mlserver.types import (
     InferenceRequest,
@@ -13,7 +13,7 @@ from mlserver.types import (
 )
 from mlserver.codecs.base import InputCodec
 from mlserver.codecs.utils import Codec
-from mlserver.codecs.decorator import SignatureCodec
+from mlserver.codecs.decorator import SignatureCodec, _as_list
 from mlserver.codecs.errors import InputsNotFound, OutputNotFound
 from mlserver.codecs.numpy import NumpyCodec, NumpyRequestCodec
 from mlserver.codecs.string import StringCodec
@@ -150,8 +150,9 @@ def test_decode_request_not_found(
                 ResponseOutput(
                     name="output-0",
                     datatype="INT64",
-                    shape=[1],
+                    shape=[1, 1],
                     data=[2],
+                    parameters=Parameters(content_type=NumpyCodec.ContentType),
                 )
             ],
         ),
@@ -162,7 +163,7 @@ def test_decode_request_not_found(
                 ResponseOutput(
                     name="output-0",
                     datatype="BYTES",
-                    shape=[1],
+                    shape=[1, 1],
                     data=[b"foo"],
                     parameters=Parameters(content_type=StringCodec.ContentType),
                 )
@@ -175,13 +176,14 @@ def test_decode_request_not_found(
                 ResponseOutput(
                     name="output-0",
                     datatype="INT64",
-                    shape=[1],
+                    shape=[1, 1],
                     data=[2],
+                    parameters=Parameters(content_type=NumpyCodec.ContentType),
                 ),
                 ResponseOutput(
                     name="output-1",
                     datatype="BYTES",
-                    shape=[1],
+                    shape=[1, 1],
                     data=[b"foo"],
                     parameters=Parameters(content_type=StringCodec.ContentType),
                 ),
@@ -194,15 +196,16 @@ def test_decode_request_not_found(
                 ResponseOutput(
                     name="output-0",
                     datatype="BYTES",
-                    shape=[1],
+                    shape=[1, 1],
                     data=[b"foo"],
                     parameters=Parameters(content_type=StringCodec.ContentType),
                 ),
                 ResponseOutput(
                     name="output-1",
                     datatype="INT64",
-                    shape=[1],
+                    shape=[1, 1],
                     data=[2],
+                    parameters=Parameters(content_type=NumpyCodec.ContentType),
                 ),
             ],
         ),
@@ -210,20 +213,32 @@ def test_decode_request_not_found(
             pd.DataFrame({"a": [2], "b": ["foo"]}),
             [PandasCodec],
             [
-                ResponseOutput(name="a", datatype="INT64", shape=[1], data=[2]),
-                ResponseOutput(name="b", datatype="BYTES", shape=[1], data=[b"foo"]),
+                ResponseOutput(name="a", datatype="INT64", shape=[1, 1], data=[2]),
+                ResponseOutput(
+                    name="b",
+                    datatype="BYTES",
+                    shape=[1, 1],
+                    data=[b"foo"],
+                    parameters=Parameters(content_type=StringCodec.ContentType),
+                ),
             ],
         ),
         (
             (pd.DataFrame({"a": [2], "b": ["foo"]}), ["bar"]),
             [PandasCodec, StringCodec],
             [
-                ResponseOutput(name="a", datatype="INT64", shape=[1], data=[2]),
-                ResponseOutput(name="b", datatype="BYTES", shape=[1], data=[b"foo"]),
+                ResponseOutput(name="a", datatype="INT64", shape=[1, 1], data=[2]),
+                ResponseOutput(
+                    name="b",
+                    datatype="BYTES",
+                    shape=[1, 1],
+                    data=[b"foo"],
+                    parameters=Parameters(content_type=StringCodec.ContentType),
+                ),
                 ResponseOutput(
                     name="output-1",
                     datatype="BYTES",
-                    shape=[1],
+                    shape=[1, 1],
                     data=[b"bar"],
                     parameters=Parameters(content_type=StringCodec.ContentType),
                 ),
@@ -236,11 +251,18 @@ def test_decode_request_not_found(
                 ResponseOutput(
                     name="output-0",
                     datatype="INT64",
-                    shape=[1],
+                    shape=[1, 1],
                     data=[3],
+                    parameters=Parameters(content_type=NumpyCodec.ContentType),
                 ),
-                ResponseOutput(name="a", datatype="INT64", shape=[1], data=[2]),
-                ResponseOutput(name="b", datatype="BYTES", shape=[1], data=[b"foo"]),
+                ResponseOutput(name="a", datatype="INT64", shape=[1, 1], data=[2]),
+                ResponseOutput(
+                    name="b",
+                    datatype="BYTES",
+                    shape=[1, 1],
+                    data=[b"foo"],
+                    parameters=Parameters(content_type=StringCodec.ContentType),
+                ),
             ],
         ),
     ],
@@ -287,3 +309,13 @@ async def test_decode_args(
 
     res = NumpyRequestCodec.decode_response(inference_response)
     assert res == output_value
+
+
+def test_as_list_typing_tuple():
+    signature_list = _as_list(Tuple[np.ndarray, np.ndarray])
+    assert signature_list == [np.ndarray, np.ndarray]
+
+
+def test_as_list_native_tuple():
+    signature_list = _as_list((np.ndarray, np.ndarray))
+    assert signature_list == [np.ndarray, np.ndarray]

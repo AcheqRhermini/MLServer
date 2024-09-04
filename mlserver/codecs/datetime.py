@@ -2,7 +2,7 @@ from typing import Any, Union, List
 from datetime import datetime
 from functools import partial
 
-from ..types import RequestInput, ResponseOutput
+from ..types import RequestInput, ResponseOutput, Parameters
 from .lists import is_list_of, as_list, ListElement
 from .base import InputCodec, register_input_codec
 
@@ -41,7 +41,7 @@ def _decode_datetime(elem: ListElement) -> datetime:
 @register_input_codec
 class DatetimeCodec(InputCodec):
     """
-    Codec that convers to / from a base64 input.
+    Codec that convers to / from a datetime input.
     """
 
     ContentType = "datetime"
@@ -56,17 +56,18 @@ class DatetimeCodec(InputCodec):
         cls, name: str, payload: List[_Datetime], use_bytes: bool = True, **kwargs
     ) -> ResponseOutput:
         packed = map(partial(_encode_datetime, use_bytes=use_bytes), payload)
-        shape = [len(payload)]
+        shape = [len(payload), 1]
         return ResponseOutput(
             name=name,
             datatype="BYTES",
             shape=shape,
             data=list(packed),
+            parameters=Parameters(content_type=cls.ContentType),
         )
 
     @classmethod
     def decode_output(cls, response_output: ResponseOutput) -> List[datetime]:
-        packed = response_output.data.__root__
+        packed = response_output.data.root
 
         return list(map(_decode_datetime, as_list(packed)))
 
@@ -80,10 +81,11 @@ class DatetimeCodec(InputCodec):
             datatype=output.datatype,
             shape=output.shape,
             data=output.data,
+            parameters=Parameters(content_type=cls.ContentType),
         )
 
     @classmethod
     def decode_input(cls, request_input: RequestInput) -> List[datetime]:
-        packed = request_input.data.__root__
+        packed = request_input.data.root
 
         return list(map(_decode_datetime, as_list(packed)))

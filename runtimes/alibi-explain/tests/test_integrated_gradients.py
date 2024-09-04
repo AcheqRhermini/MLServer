@@ -7,7 +7,6 @@ import tensorflow as tf
 from alibi.explainers import IntegratedGradients
 from numpy.testing import assert_array_almost_equal
 
-from helpers.tf_model import get_tf_mnist_model_uri
 from mlserver.codecs import NumpyCodec
 from mlserver.types import InferenceRequest, Parameters, RequestInput
 from mlserver_alibi_explain.common import convert_from_bytes
@@ -33,8 +32,8 @@ def payload() -> InferenceRequest:
 
 
 @pytest.fixture()
-def alibi_integrated_gradients_model() -> Tuple:
-    inference_model = tf.keras.models.load_model(get_tf_mnist_model_uri())
+def alibi_integrated_gradients_model(tf_mnist_model_uri: str) -> Tuple:
+    inference_model = tf.keras.models.load_model(tf_mnist_model_uri)
     ig_model = IntegratedGradients(model=inference_model)
     return inference_model, ig_model
 

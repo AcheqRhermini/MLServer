@@ -1,6 +1,7 @@
 ```{toctree}
 :hidden:
 :titlesonly:
+Getting Started <./getting-started/index>
 User Guide <./user-guide/index>
 Inference Runtimes <./runtimes/index>
 Reference <./reference/index>
@@ -12,6 +13,7 @@ Reference <./reference/index>
 :maxdepth: 1
 
 Examples <./examples/index>
+Changelog <./changelog>
 ```
 
 ```{include} ../README.md

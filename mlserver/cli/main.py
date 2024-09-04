@@ -1,6 +1,7 @@
 """
 Command-line interface to manage MLServer models.
 """
+
 import click
 import asyncio
 
@@ -123,6 +124,14 @@ async def dockerfile(folder: str, include_dockerignore: bool):
     help="Local path to the output file for the inference responses to be  written to.",
 )
 @click.option("--workers", "-w", default=10, envvar="MLSERVER_INFER_WORKERS")
+@click.option("--retries", "-r", default=3, envvar="MLSERVER_INFER_RETRIES")
+@click.option(
+    "--batch-size",
+    "-s",
+    default=1,
+    envvar="MLSERVER_INFER_BATCH_SIZE",
+    help="Send inference requests grouped together as micro-batches.",
+)
 @click.option(
     "--binary-data",
     "-b",
@@ -159,8 +168,39 @@ async def dockerfile(folder: str, include_dockerignore: bool):
     ),
 )
 @click.option(
+    "--request-headers",
+    "-H",
+    envvar="MLSERVER_INFER_REQUEST_HEADERS",
+    type=str,
+    multiple=True,
+    help=(
+        "Headers to be set on each inference request send to the server. "
+        "Multiple options are allowed as: -H 'Header1: Val1' -H 'Header2: Val2'. "
+        "When setting up as environmental provide as 'Header1:Val1 Header2:Val2'."
+    ),
+)
+@click.option(
+    "--timeout",
+    default=60,
+    envvar="MLSERVER_INFER_CONNECTION_TIMEOUT",
+    help="Connection timeout to be passed to tritonclient.",
+)
+@click.option(
+    "--batch-interval",
+    default=0,
+    type=float,
+    envvar="MLSERVER_INFER_BATCH_INTERVAL",
+    help="Minimum time interval (in seconds) between requests made by each worker.",
+)
+@click.option(
+    "--batch-jitter",
+    default=0,
+    type=float,
+    envvar="MLSERVER_INFER_BATCH_JITTER",
+    help="Maximum random jitter (in seconds) added to batch interval between requests.",
+)
+@click.option(
     "--use-ssl",
-    "-s",
     is_flag=True,
     default=False,
     envvar="MLSERVER_INFER_USE_SSL",
@@ -179,26 +219,43 @@ async def infer(
     model_name,
     url,
     workers,
+    retries,
+    batch_size,
     input_data_path,
     output_data_path,
     binary_data,
     transport,
+    request_headers,
+    timeout,
+    batch_interval,
+    batch_jitter,
     use_ssl,
     insecure,
     verbose,
     extra_verbose,
 ):
     """
-    Execute batch inference requests against V2 inference server (experimental).
+    Deprecated: This experimental feature will be removed in future work.
+    Execute batch inference requests against V2 inference server.
     """
+    logger.warn(
+        "This feature has been deprecated and will be removed in a future version"
+    )
+
     await process_batch(
         model_name=model_name,
         url=url,
         workers=workers,
+        retries=retries,
+        batch_size=batch_size,
         input_data_path=input_data_path,
         output_data_path=output_data_path,
         binary_data=binary_data,
         transport=transport,
+        request_headers=request_headers,
+        timeout=timeout,
+        batch_interval=batch_interval,
+        batch_jitter=batch_jitter,
         use_ssl=use_ssl,
         insecure=insecure,
         verbose=verbose,

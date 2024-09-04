@@ -5,6 +5,7 @@ environment.yml or a requirements.txt file).
 Note that this is independent from the SKLearn runtime, and it's only meant to
 be used to test custom model images.
 """
+
 import numpy as np
 
 from sklearn.dummy import DummyClassifier
@@ -23,8 +24,7 @@ class DummySKLearnModel(MLModel):
         self._model = DummyClassifier(strategy="prior")
         self._model.fit(X, y)
 
-        self.ready = True
-        return self.ready
+        return True
 
     async def predict(self, payload: InferenceRequest) -> InferenceResponse:
         decoded = self.decode_request(payload, default_codec=NumpyRequestCodec)
